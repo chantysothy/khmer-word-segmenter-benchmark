@@ -296,7 +296,7 @@ class KhmerSegmenter:
     def _get_number_length(self, text, start_index):
         """
         Returns length of a number sequence.
-        Supports 1,234.56 and 1.234,56 formats.
+        Supports 1,234.56 and 1.234,56 and 1 000 000 formats.
         """
         n = len(text)
         i = start_index
@@ -311,8 +311,9 @@ class KhmerSegmenter:
                 i += 1
                 continue
             
-            # Check for separators (comma or dot)
-            if char in [',', '.']:
+            # Check for separators (comma, dot, OR SPACE)
+            # SPACE is allowed if followed by a digit
+            if char in [',', '.', ' ']:
                 if i + 1 < n and self._is_digit(text[i+1]):
                     i += 2 # Consume separator and next digit
                     continue
@@ -327,13 +328,18 @@ class KhmerSegmenter:
         # Check for standard punctuation and Khmer punctuation
         try:
             code = ord(char)
-            # Khmer Punctuation INCLUDING ៗ (\u17D7)
+            # Khmer Punctuation INCLUDING ៗ (\u17D7) AND ៛ (U+17DB) -> NO, U+17DB is Currency Reil
             # \u17D4 (។), \u17D5 (៕), \u17D6 (៖), \u17D7 (ៗ) etc
             if 0x17D4 <= code <= 0x17DA:
                 return True
-            # ASCII/General punctuation AND SPACE (' ') AND QUOTES
+            # Check for Khmer Currency Symbol ៛ (U+17DB)
+            if code == 0x17DB:
+                return True
+                
+            # ASCII/General punctuation AND SPACE (' ') AND QUOTES AND SLASH (/)
             # Also include U+02DD (Double Acute Accent) which looks like a quote
-            if char in set('!?.,;:"\'()[]{}- «»“”˝'):
+            # Include $ and % as separators (to split them from numbers)
+            if char in set('!?.,;:"\'()[]{}-/ «»“”˝$%'):
                 return True
             return False
         except:
@@ -341,20 +347,21 @@ class KhmerSegmenter:
 
     def _is_acronym_start(self, text, index):
         """
-        Checks if the character at index starts an acronym sequence (Char + .).
+        Checks if the character at index starts an acronym sequence (Cluster + .).
         """
-        # Need at least 2 chars: Char + .
-        if index + 1 >= len(text):
+        n = len(text)
+        # Need at least 2 chars: Cluster + .
+        if index + 1 >= n:
             return False
             
-        # Check if next char is dot
-        if text[index+1] != '.':
+        # Get cluster length
+        cluster_len = self._get_khmer_cluster_length(text, index)
+        if cluster_len == 0:
             return False
             
-        code = ord(text[index])
-        
-        # Check if Char is Consonant (0x1780-0x17A2) or Indep Vowel (0x17A3-0x17B3)
-        if 0x1780 <= code <= 0x17B3:
+        # Check if char AFTER cluster is dot
+        dot_index = index + cluster_len
+        if dot_index < n and text[dot_index] == '.':
             return True
             
         return False
@@ -362,17 +369,24 @@ class KhmerSegmenter:
     def _get_acronym_length(self, text, start_index):
         """
         Returns length of acronym sequence starting at start_index.
-        Matches pattern (KhmerChar + .)+
+        Matches pattern (Cluster + .)+
         """
         n = len(text)
         i = start_index
         
         while i < n:
-            if self._is_acronym_start(text, i):
-                i += 2 # Consume Char and Dot
+            # Check for Cluster + Dot
+            cluster_len = self._get_khmer_cluster_length(text, i)
+            if cluster_len > 0:
+                dot_index = i + cluster_len
+                if dot_index < n and text[dot_index] == '.':
+                    i = dot_index + 1 # Advance past cluster and dot
+                    continue
+                else:
+                    break
             else:
-                break
-                
+                 break
+        
         return i - start_index
 
     def _apply_heuristics(self, segments):
@@ -573,28 +587,53 @@ class KhmerSegmenter:
         raw_segments = segments[::-1]
         
         # Post-processing Pass 1: Snap Invalid Single Consonants to Previous
-        # Exclude separators from being snapped
+        # UNLESS they are surrounded by spaces/separators
         pass1_segments = []
-        for seg in raw_segments:
+        for j, seg in enumerate(raw_segments):
             # Check if this segment is an invalid independent single char
             is_invalid_single = (len(seg) == 1 
                                  and seg not in self.valid_single_words 
                                  and seg not in self.words 
                                  and not self._is_digit(seg)
-                                 and not self._is_separator(seg)) # Don't snap separators
+                                 and not self._is_separator(seg)) 
             
-            # Special check for Acronym chunks (length 2 ending in .)
-            # They should be preserved and NOT snapped.
-            # But wait, my acronym logic produces chunks like "គ.ម." (length 4).
-            # Or "ខ." (length 2).
-            # "ខ." has length 2. `len(seg) == 1` prevents snapping.
-            # So Acronyms are safe from this snapping logic.
-            
-            if is_invalid_single and pass1_segments:
-                # Check if previous is NOT a separator (though technically we can snap to anything, usually words)
-                if not self._is_separator(pass1_segments[-1]):
-                    prev = pass1_segments.pop()
-                    pass1_segments.append(prev + seg)
+            if is_invalid_single:
+                # Valid Exception: Separated by separators/spaces?
+                is_valid_context = False
+                
+                # Check Prev
+                prev_is_sep = False
+                if len(pass1_segments) > 0:
+                    prev_seg = pass1_segments[-1]
+                    # Check first char of prev seg matches separator
+                    if self._is_separator(prev_seg[0]) or prev_seg in [' ', '\u200b']: 
+                        prev_is_sep = True
+                elif j == 0:
+                     # Start of string acts as separator boundary
+                     prev_is_sep = True
+                     
+                # Check Next
+                next_is_sep = False
+                if j + 1 < len(raw_segments):
+                    next_seg = raw_segments[j+1]
+                    if self._is_separator(next_seg[0]) or next_seg in [' ', '\u200b']:
+                        next_is_sep = True
+                else:
+                    # End of string acts as separator boundary
+                    next_is_sep = True
+                    
+                if prev_is_sep and next_is_sep:
+                    # It's an isolated single char (e.g. " . ក . ") -> Keep it
+                    pass1_segments.append(seg)
+                    continue
+
+                if pass1_segments:
+                    # Check if previous is NOT a separator (though technically we can snap to anything, usually words)
+                    if not self._is_separator(pass1_segments[-1]):
+                        prev = pass1_segments.pop()
+                        pass1_segments.append(prev + seg)
+                    else:
+                        pass1_segments.append(seg)
                 else:
                     pass1_segments.append(seg)
             else:

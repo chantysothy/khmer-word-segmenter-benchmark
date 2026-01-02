@@ -9,7 +9,7 @@ import concurrent.futures
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from khmer_segmenter import KhmerSegmenter
 
-def is_unknown(word: str, segmenter: KhmerSegmenter) -> bool:
+def is_unknown(word: str, segmenter: KhmerSegmenter, prev_token: str = None, next_token: str = None) -> bool:
     """
     Determines if a segmented token is considered 'unknown'.
     """
@@ -18,9 +18,32 @@ def is_unknown(word: str, segmenter: KhmerSegmenter) -> bool:
         return False
         
     # 2. Check if it's a valid single char
-    if len(word) == 1 and word in segmenter.valid_single_words:
-        return False
+    if len(word) == 1:
+        if word in segmenter.valid_single_words:
+            return False
         
+        # Check context: If surrounded by separators/spaces, consider it valid (isolated char)
+        # Check Prev
+        is_prev_sep = False
+        if prev_token is None: # Start of line
+            is_prev_sep = True
+        elif not prev_token.strip(): # Whitespace
+            is_prev_sep = True
+        elif segmenter._is_separator(prev_token):
+            is_prev_sep = True
+            
+        # Check Next
+        is_next_sep = False
+        if next_token is None: # End of line
+            is_next_sep = True
+        elif not next_token.strip(): # Whitespace
+            is_next_sep = True
+        elif segmenter._is_separator(next_token):
+            is_next_sep = True
+            
+        if is_prev_sep and is_next_sep:
+            return False
+
     # 3. Check if digit
     if segmenter._is_digit(word):
         return False
@@ -31,6 +54,26 @@ def is_unknown(word: str, segmenter: KhmerSegmenter) -> bool:
 
     # 5. Check if it's just whitespace or empty
     if not word.strip():
+        return False
+
+    # 6. Ignore Latin words (English, etc.)
+    for char in word:
+        code = ord(char)
+        if (0x0041 <= code <= 0x005A) or (0x0061 <= code <= 0x007A):
+            return False
+            
+    # 7. Ignore pure numbers (Arabic or Khmer digits mixed)
+    # _is_digit might already cover this, but let's be safe for mixed "123"
+    # Actually _is_digit handles recursion for strings.
+    
+    # 8. Ignore Symbols/Signs that are not valid Khmer words
+    has_khmer = False
+    for char in word:
+        if segmenter._is_khmer_char(char):
+            has_khmer = True
+            break
+            
+    if not has_khmer:
         return False
 
     return True
@@ -58,7 +101,10 @@ def process_segmented_file(input_file: str, segmenter: KhmerSegmenter) -> Dict[s
             words = content.split(" | ")
             
             for i, w in enumerate(words):
-                if is_unknown(w, segmenter):
+                prev_token = words[i-1] if i > 0 else None
+                next_token = words[i+1] if i + 1 < len(words) else None
+                
+                if is_unknown(w, segmenter, prev_token, next_token):
                     stats = unknown_stats[w]
                     stats['count'] += 1
                     
