@@ -38,6 +38,14 @@ class KhmerSegmenter:
                     self.words.add(word)
                     if len(word) > self.max_word_length:
                         self.max_word_length = len(word)
+                    
+                    # Generate variants (Ta/Da, Ro Order)
+                    variants = self._generate_variants(word)
+                    for v in variants:
+                        self.words.add(v)
+                        if len(v) > self.max_word_length:
+                            self.max_word_length = len(v)
+
         # Filter out compound words containing "ឬ" (or) to force splitting
         # e.g. "ឬហៅ" -> remove if "ហៅ" is invalid? No, if "ហៅ" IS valid.
         # "មែនឬទេ" -> remove if "មែន" and "ទេ" are valid.
@@ -87,6 +95,70 @@ class KhmerSegmenter:
                  
         print(f"Loaded {len(self.words)} words. Max length: {self.max_word_length}")
 
+    def _generate_variants(self, word):
+        """
+        Generates interchangeable variants for a word.
+        1. Coeng Ta (\u17D2\u178F) <-> Coeng Da (\u17D2\u178D)
+        2. Coeng Ro (\u17D2\u179A) ordering with other Coengs
+        """
+        variants = set()
+        
+        # 1. Coeng Ta <-> Coeng Da
+        # We can simply replace all instances. 
+        # Combinatorial: if a word has 2 instances, do we need all 4 permutations?
+        # Usually mixed usage is rare. Swapping ALL is the most robust simple approach.
+        # Or simply generate "All Ta" and "All Da" versions.
+        
+        coeng_ta = '\u17D2\u178F'
+        coeng_da = '\u17D2\u178D'
+        
+        if coeng_ta in word:
+            variants.add(word.replace(coeng_ta, coeng_da))
+        if coeng_da in word:
+            variants.add(word.replace(coeng_da, coeng_ta))
+            
+        # Add generated variants to set so we process THEM for Ro-swap too
+        # But for simplicity, let's just add them to return set.
+        
+        # 2. Coeng Ro Ordering
+        # Pattern: (Coeng Ro)(Other Coeng) <-> (Other Coeng)(Coeng Ro)
+        # Coeng Ro: \u17D2\u179A
+        # Other Coeng: \u17D2 followed by NOT \u179A
+        
+        # Simplest way: Check for specific substrings and swap
+        # Regex approach is best, but Python 're' with overlapping replacement is tricky.
+        # But we don't expect overlapping Coeng sequences often.
+        
+        # Let's iterate over the word (and its Ta/Da variants also)
+        base_set = {word} | variants
+        final_variants = set(variants)
+        
+        import re
+        # Pattern 1: Coeng Ro followed by Other Coeng
+        # \u17D2\u179A (\u17D2[^\u179A])
+        p1 = re.compile(r'(\u17D2\u179A)(\u17D2[^\u179A])')
+        
+        # Pattern 2: Other Coeng followed by Coeng Ro
+        # (\u17D2[^\u179A]) \u17D2\u179A
+        p2 = re.compile(r'(\u17D2[^\u179A])(\u17D2\u179A)')
+        
+        for w in base_set:
+            # Apply Swap 1: Ro -> Other ==> Other -> Ro
+            # Use a loop to handle multiple occurrences
+            w_new = w
+            # Applying sub might replace all non-overlapping.
+            if p1.search(w):
+                w_new = p1.sub(r'\2\1', w)
+                final_variants.add(w_new)
+            
+            # Apply Swap 2: Other -> Ro ==> Ro -> Other
+            w_new2 = w
+            if p2.search(w):
+                w_new2 = p2.sub(r'\2\1', w)
+                final_variants.add(w_new2)
+                
+        return final_variants
+
     def _load_frequencies(self, path):
         if not os.path.exists(path):
             print(f"Frequency file not found at {path}. Using default costs.")
@@ -113,6 +185,24 @@ class KhmerSegmenter:
         for word, count in data.items():
             eff = max(count, min_freq_floor)
             effective_counts[word] = eff
+            
+            # Add variants with SAME frequency
+            variants = self._generate_variants(word)
+            for v in variants:
+                if v not in effective_counts:
+                    effective_counts[v] = eff
+                # If variant already exists (e.g. explicitly in freq list), keep higher? 
+                # Or just keep existing. Assuming source data is truth.
+                # Actually, if we generated it, let's treat it as alias.
+            
+            # Total tokens calculation is tricky with aliases. 
+            # We shouldn't inflate total tokens by duplication, as they are mutually exclusive alternatives.
+            # But the math depends on prob = count / total.
+            # If we add entries, we should update total? 
+            # For segmentation cost, Cost = -log(P). 
+            # If we have Word A (cost X) and Variant A' (cost X), algorithm picks match.
+            # So inflating total tokens just shifts all costs. Not critical.
+            # We will just sum `eff` for the *primary* words to keep denominator stable-ish.
             total_tokens += eff
             
         if total_tokens > 0:
@@ -384,7 +474,10 @@ class KhmerSegmenter:
             if i > 0 and text[i-1] == '\u17D2':
                 # Check if valid subscript (Consonant)
                 if '\u1780' <= text[i] <= '\u17A2':
-                    continue # Valid consonant shoud have been attached. Block split.
+                    # continue # Valid consonant shoud have been attached. Block split.
+                    # FIX: If we blocked here, and there is no other path (e.g. orphan Coeng), we crash.
+                    # We must allow recovery.
+                    force_repair = True 
                 else:
                     force_repair = True # Stray Coeng. Force single-char consumption of current char.
             
@@ -469,7 +562,11 @@ class KhmerSegmenter:
         while curr > 0:
             cost, prev = dp[curr]
             if prev == -1: 
-                raise ValueError("Could not segment text.")
+                # Debugging info
+                reachable = [i for i, x in enumerate(dp) if x[1] != -1 or i==0]
+                max_reachable = max(reachable) if reachable else 0
+                snippet = text[max_reachable:min(n, max_reachable+20)]
+                raise ValueError(f"Could not segment text. Stuck at index {max_reachable} (total {n}). Next chars: {repr(snippet)}. Full text length: {len(text)}")
             segments.append(text[prev:curr])
             curr = prev
             
