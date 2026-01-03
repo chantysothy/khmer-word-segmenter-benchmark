@@ -71,6 +71,11 @@ def batch_process(corpus_file, limit):
     print(f"Done. Processed {count} lines.")
 
 if __name__ == "__main__":
+    # Force utf-8 for stdout to handle Khmer characters on Windows consoles
+    if sys.stdout.encoding.lower() != 'utf-8':
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
     parser = argparse.ArgumentParser(description="Test Khmer Viterbi Segmenter")
     parser.add_argument("-s", "--source", help="Optional path to corpus file for batch processing")
     parser.add_argument("-l", "--limit", type=int, default=1000, help="Limit number of lines for batch processing (default 1000)")

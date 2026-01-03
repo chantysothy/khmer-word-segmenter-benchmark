@@ -1,0 +1,12 @@
+obj/
+bin/
+build/
+khmer_segmenter_cpp
+*.o
+*.exe
+.vscode/
+.cache/
+compile_commands.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake

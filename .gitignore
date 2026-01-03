@@ -11,3 +11,31 @@ unknown_words_from_results.txt
 .idea/
 .DS_Store
 Thumbs.db
+_bmad/*
+.github/agents/*
+.agent/*
+.claude/*
+
+# Language-specific build outputs
+khmer-dotnet/bin/*
+khmer-dotnet/obj/*
+khmer-node/dist/*
+khmer-node/node_modules/*
+khmer-rs/target/*
+khmer-wasm/node_modules/*
+khmer-cpp/build/*
+khmer-java/target/*
+khmer-java/*.class
+khmer-go/khmer-go.exe
+khmer-go/khmer-go
+
+# Temp files
+temp_*.txt
+temp_*.json
+*.tmp
+
+# Test outputs (keep golden master)
+data/*_output.json
+data/*_out.json
+data/*_out_*.json
+!data/golden_master.jsonl

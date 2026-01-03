@@ -1,0 +1,22 @@
+[package]
+name = "khmer-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Claude Code <noreply@anthropic.com>"]
+description = "High-performance Khmer word segmenter ported from Python"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+rayon = "1.8" # For benchmarking/parallelism later
+anyhow = "1.0"
+fxhash = "0.2.1"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "segmentation_benchmark"
+harness = false

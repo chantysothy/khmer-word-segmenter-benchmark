@@ -3,6 +3,7 @@ import os
 import time
 import timeit
 import concurrent.futures
+import argparse
 
 # Force UTF-8 for output
 sys.stdout.reconfigure(encoding='utf-8')
@@ -41,14 +42,14 @@ def get_memory_mb():
         # Fallback (roughly just object size, not full RSS) or 0
         return 0.0
 
-def benchmark_suite():
+def benchmark_suite(corpus_file=None):
     # Setup
     print(f"Initial Memory: {get_memory_mb():.2f} MB")
-    
+
     data_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
     dict_path = os.path.join(data_dir, "khmer_dictionary_words.txt")
     freq_path = os.path.join(data_dir, "khmer_word_frequencies.json")
-    
+
     print("Loading KhmerSegmenter...")
     start_load = time.time()
     mem_before_ours = get_memory_mb()
@@ -56,15 +57,24 @@ def benchmark_suite():
     mem_after_ours = get_memory_mb()
     print(f"KhmerSegmenter Load Time: {time.time() - start_load:.4f}s")
     print(f"KhmerSegmenter Memory Added: {mem_after_ours - mem_before_ours:.2f} MB")
-    
-    # New Sentence provided by user
-    text = (
-        "ក្រុមហ៊ុនទទួលបានប្រាក់ចំណូល ១ ០០០ ០០០ ដុល្លារក្នុងឆ្នាំនេះ ខណៈដែលតម្លៃភាគហ៊ុនកើនឡើង ៥% ស្មើនឹង 50.00$។ "
-        "លោក ទេព សុវិចិត្រ នាយកប្រតិបត្តិដែលបញ្ចប់ការសិក្សាពីសាកលវិទ្យាល័យភូមិន្ទភ្នំពេញ (ស.ភ.ភ.ព.) "
-        "បានថ្លែងថា ភាពជោគជ័យផ្នែកហិរញ្ញវត្ថុនាឆ្នាំនេះ គឺជាសក្ខីភាពនៃកិច្ចខិតខំប្រឹងប្រែងរបស់ក្រុមការងារទាំងមូល "
-        "និងការជឿទុកចិត្តពីសំណាក់វិនិយោគិន។"
-    )
-    
+
+    if corpus_file:
+        print(f"Reading corpus from {corpus_file}...")
+        with open(corpus_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        # Combine into one big string for throughput test, or keep as lines?
+        # Let's combine first 500 lines to avoid excessive waiting if file is huge
+        text = "\n".join([line.strip() for line in lines[:500] if line.strip()])
+        print(f"Loaded {len(lines)} lines. Using first 500 non-empty lines.")
+    else:
+        # New Sentence provided by user
+        text = (
+            "ក្រុមហ៊ុនទទួលបានប្រាក់ចំណូល ១ ០០០ ០០០ ដុល្លារក្នុងឆ្នាំនេះ ខណៈដែលតម្លៃភាគហ៊ុនកើនឡើង ៥% ស្មើនឹង 50.00$។ "
+            "លោក ទេព សុវិចិត្រ នាយកប្រតិបត្តិដែលបញ្ចប់ការសិក្សាពីសាកលវិទ្យាល័យភូមិន្ទភ្នំពេញ (ស.ភ.ភ.ព.) "
+            "បានថ្លែងថា ភាពជោគជ័យផ្នែកហិរញ្ញវត្ថុនាឆ្នាំនេះ គឺជាសក្ខីភាពនៃកិច្ចខិតខំប្រឹងប្រែងរបស់ក្រុមការងារទាំងមូល "
+            "និងការជឿទុកចិត្តពីសំណាក់វិនិយោគិន។"
+        )
+
     # Check khmernltk loading
     if HAS_KHMERNLTK:
         print("\nLoading khmernltk model...")
@@ -75,17 +85,28 @@ def benchmark_suite():
         print(f"khmernltk Memory Added: {mem_after_nltk - mem_before_nltk:.2f} MB")
 
     print(f"\n--- Text to Segment (Length: {len(text)}) ---")
-    print(text)
+    if len(text) > 500:
+        print(text[:500] + "...")
+    else:
+        print(text)
     print("-" * 60)
 
     # 1. Output Comparison
     print("\n--- 1. Segmentation Output ---")
     res_ours = seg.segment(text)
-    print(f"KhmerSegmenter:\n{' | '.join(res_ours)}\n")
-    
+    preview_ours = ' | '.join(res_ours)
+    if len(preview_ours) > 500:
+        print(f"KhmerSegmenter:\n{preview_ours[:500]}...\n")
+    else:
+        print(f"KhmerSegmenter:\n{preview_ours}\n")
+
     if HAS_KHMERNLTK:
         res_nltk = word_tokenize(text)
-        print(f"khmernltk:\n{' | '.join(res_nltk)}\n")
+        preview_nltk = ' | '.join(res_nltk)
+        if len(preview_nltk) > 500:
+            print(f"khmernltk:\n{preview_nltk[:500]}...\n")
+        else:
+            print(f"khmernltk:\n{preview_nltk}\n")
     
     # 2. Sequential Speed
     ITERATIONS_SEQ = 1000
@@ -128,4 +149,8 @@ def benchmark_suite():
             print(f"khmernltk concurrent failed: {e}")
 
 if __name__ == "__main__":
-    benchmark_suite()
+    parser = argparse.ArgumentParser(description="Benchmark Khmer Segmenter")
+    parser.add_argument("--source", "-s", help="Optional corpus file to benchmark against (reads full file)")
+    args = parser.parse_args()
+
+    benchmark_suite(corpus_file=args.source)
