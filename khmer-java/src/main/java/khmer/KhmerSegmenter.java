@@ -14,12 +14,30 @@ public class KhmerSegmenter {
     // Pre-allocated DP buffers (not thread-safe, but faster for single-threaded use)
     private float[] dpCost;
     private int[] dpParent;
+    // Pre-allocated codepoint buffer to avoid repeated allocation
+    private int[] cpBuffer;
 
     public KhmerSegmenter(Dictionary dictionary) {
         this.dictionary = dictionary;
         // Pre-allocate reasonable buffer sizes
         this.dpCost = new float[1024];
         this.dpParent = new int[1024];
+        this.cpBuffer = new int[1024];
+    }
+
+    /**
+     * Convert string to codepoints using pre-allocated buffer.
+     * Returns the number of codepoints written.
+     */
+    private int toCodepoints(String text, int[] buffer) {
+        int len = text.length();
+        int cpIndex = 0;
+        for (int i = 0; i < len; ) {
+            int cp = text.codePointAt(i);
+            buffer[cpIndex++] = cp;
+            i += Character.charCount(cp);
+        }
+        return cpIndex;
     }
 
     /**
@@ -32,21 +50,25 @@ public class KhmerSegmenter {
             return new ArrayList<>();
         }
 
-        // Convert to codepoints for proper Unicode handling
-        int[] cps = textRaw.codePoints().toArray();
-        int n = cps.length;
+        // Ensure cpBuffer is large enough
+        int textLen = textRaw.length();
+        if (cpBuffer.length < textLen) {
+            cpBuffer = new int[textLen + 128];
+        }
+
+        // Convert to codepoints using pre-allocated buffer
+        int n = toCodepoints(textRaw, cpBuffer);
+        int[] cps = cpBuffer;
 
         // Ensure buffers are large enough
         if (dpCost.length < n + 1) {
-            dpCost = new float[n + 1];
-            dpParent = new int[n + 1];
+            dpCost = new float[n + 128];
+            dpParent = new int[n + 128];
         }
 
-        // Reset DP arrays
-        for (int i = 0; i <= n; i++) {
-            dpCost[i] = Float.POSITIVE_INFINITY;
-            dpParent[i] = -1;
-        }
+        // Reset DP arrays - use Arrays.fill for efficiency
+        java.util.Arrays.fill(dpCost, 0, n + 1, Float.POSITIVE_INFINITY);
+        java.util.Arrays.fill(dpParent, 0, n + 1, -1);
         dpCost[0] = 0.0f;
 
         // Cache frequently accessed values

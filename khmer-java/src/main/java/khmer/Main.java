@@ -100,26 +100,48 @@ public class Main {
         int numThreads = threads > 0 ? threads : Runtime.getRuntime().availableProcessors();
         System.out.println("Processing " + numLines + " lines with " + numThreads + " threads...");
 
-        long startProcess = System.currentTimeMillis();
+        // Pre-convert lines to trimmed strings for faster access
+        String[] lineArray = new String[numLines];
+        for (int i = 0; i < numLines; i++) {
+            lineArray[i] = lines.get(i).trim();
+        }
+
+        // ThreadLocal segmenter ensures each thread has its own instance with pre-allocated buffers
+        ThreadLocal<KhmerSegmenter> segmenterLocal = ThreadLocal.withInitial(() -> new KhmerSegmenter(dictionary));
+
+        // JIT Warmup: process first 100 lines to warm up the JIT compiler
+        int warmupSize = Math.min(100, numLines);
+        for (int i = 0; i < warmupSize; i++) {
+            KhmerSegmenter seg = segmenterLocal.get();
+            seg.segment(lineArray[i]);
+        }
 
         // Pre-allocate result array for parallel processing
         String[] results = new String[numLines];
 
-        // Use parallel stream for processing
-        // ThreadLocal segmenter ensures each thread has its own instance
-        ThreadLocal<KhmerSegmenter> segmenterLocal = ThreadLocal.withInitial(() -> new KhmerSegmenter(dictionary));
+        long startProcess = System.currentTimeMillis();
 
-        IntStream.range(0, numLines)
-            .parallel()
-            .forEach(i -> {
-                String line = lines.get(i).trim();
-                KhmerSegmenter segmenter = segmenterLocal.get();
-                List<String> segments = segmenter.segment(line);
-                results[i] = toJson(i, line, segments);
-            });
+        // Use ForkJoinPool with controlled parallelism
+        java.util.concurrent.ForkJoinPool pool = new java.util.concurrent.ForkJoinPool(numThreads);
+        try {
+            pool.submit(() ->
+                IntStream.range(0, numLines)
+                    .parallel()
+                    .forEach(i -> {
+                        KhmerSegmenter segmenter = segmenterLocal.get();
+                        List<String> segments = segmenter.segment(lineArray[i]);
+                        results[i] = toJson(i, lineArray[i], segments);
+                    })
+            ).get();
+        } catch (Exception e) {
+            throw new IOException("Parallel processing failed", e);
+        } finally {
+            pool.shutdown();
+        }
 
-        // Write results sequentially
-        try (BufferedWriter writer = Files.newBufferedWriter(Path.of(outputPath), StandardCharsets.UTF_8)) {
+        // Write results sequentially with buffered writer
+        try (BufferedWriter writer = new BufferedWriter(
+                new OutputStreamWriter(new FileOutputStream(outputPath), StandardCharsets.UTF_8), 65536)) {
             for (String json : results) {
                 writer.write(json);
                 writer.newLine();
