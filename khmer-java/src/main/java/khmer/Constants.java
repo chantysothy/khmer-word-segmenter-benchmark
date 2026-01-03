@@ -37,13 +37,17 @@ public final class Constants {
         }
     }
 
-    // Lookup table for separator chars in ASCII range
+    // Lookup table for separator chars in extended ASCII range (0-255)
     private static final boolean[] SEPARATOR_ASCII = new boolean[256];
     static {
+        // Basic ASCII separators
         String separators = "!?.,;:\"'()[]{}-/ $%";
         for (char c : separators.toCharArray()) {
             if (c < 256) SEPARATOR_ASCII[c] = true;
         }
+        // Extended punctuation (Latin-1 range) - must be included here too!
+        SEPARATOR_ASCII[0x00AB] = true; // « Left-Pointing Double Angle Quotation Mark
+        SEPARATOR_ASCII[0x00BB] = true; // » Right-Pointing Double Angle Quotation Mark
     }
 
     // Separator characters (for extended chars)

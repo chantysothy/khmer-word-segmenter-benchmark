@@ -39,3 +39,4 @@ data/*_output.json
 data/*_out.json
 data/*_out_*.json
 !data/golden_master.jsonl
+khmer-bun/node_modules/*
