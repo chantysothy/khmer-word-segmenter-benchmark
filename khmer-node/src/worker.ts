@@ -18,6 +18,40 @@ interface WorkerResult {
     results: string[];
 }
 
+// Fast JSON escape (avoid regex)
+function escapeJson(s: string): string {
+    let result = '';
+    for (let i = 0; i < s.length; i++) {
+        const c = s.charAt(i);
+        switch (c) {
+            case '"': result += '\\"'; break;
+            case '\\': result += '\\\\'; break;
+            case '\n': result += '\\n'; break;
+            case '\r': result += '\\r'; break;
+            case '\t': result += '\\t'; break;
+            default:
+                const code = s.charCodeAt(i);
+                if (code < 32) {
+                    result += '\\u' + code.toString(16).padStart(4, '0');
+                } else {
+                    result += c;
+                }
+        }
+    }
+    return result;
+}
+
+// Fast JSON builder (avoids JSON.stringify overhead)
+function toJson(id: number, input: string, segments: string[]): string {
+    let result = '{"id":' + id + ',"input":"' + escapeJson(input) + '","segments":[';
+    for (let i = 0; i < segments.length; i++) {
+        if (i > 0) result += ',';
+        result += '"' + escapeJson(segments[i]) + '"';
+    }
+    result += ']}';
+    return result;
+}
+
 async function main() {
     const { dictPath, freqPath } = workerData as WorkerData;
 
@@ -32,16 +66,11 @@ async function main() {
     // Handle messages
     parentPort!.on('message', (msg: WorkerMessage) => {
         if (msg.type === 'segment') {
-            const results: string[] = [];
+            const results: string[] = new Array(msg.lines.length);
             for (let i = 0; i < msg.lines.length; i++) {
                 const line = msg.lines[i];
                 const segments = segmenter.segment(line);
-                const record = JSON.stringify({
-                    id: msg.startId + i,
-                    input: line,
-                    segments: segments
-                });
-                results.push(record);
+                results[i] = toJson(msg.startId + i, line, segments);
             }
             const response: WorkerResult = { type: 'results', results };
             parentPort!.postMessage(response);

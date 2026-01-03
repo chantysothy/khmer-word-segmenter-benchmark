@@ -58,7 +58,10 @@ function parseArgs(): Args {
 }
 
 async function runParallel(args: Args, linesToProcess: string[]): Promise<string[]> {
-    const numWorkers = args.threads > 0 ? args.threads : os.cpus().length;
+    // Use fewer workers to reduce dictionary loading overhead
+    // Each worker needs ~0.3s to load dictionary, so more workers = more total load time
+    // Testing shows 8 workers is optimal for 10K lines workload
+    const numWorkers = args.threads > 0 ? args.threads : Math.min(os.cpus().length, 8);
     console.log(`Using ${numWorkers} worker threads...`);
 
     const workerPath = path.join(__dirname, 'worker.js');
@@ -121,22 +124,51 @@ async function runParallel(args: Args, linesToProcess: string[]): Promise<string
     return results;
 }
 
+// Fast JSON escape (avoid regex)
+function escapeJson(s: string): string {
+    let result = '';
+    for (let i = 0; i < s.length; i++) {
+        const c = s.charAt(i);
+        switch (c) {
+            case '"': result += '\\"'; break;
+            case '\\': result += '\\\\'; break;
+            case '\n': result += '\\n'; break;
+            case '\r': result += '\\r'; break;
+            case '\t': result += '\\t'; break;
+            default:
+                const code = s.charCodeAt(i);
+                if (code < 32) {
+                    result += '\\u' + code.toString(16).padStart(4, '0');
+                } else {
+                    result += c;
+                }
+        }
+    }
+    return result;
+}
+
+// Fast JSON builder (avoids JSON.stringify overhead)
+function toJson(id: number, input: string, segments: string[]): string {
+    let result = '{"id":' + id + ',"input":"' + escapeJson(input) + '","segments":[';
+    for (let i = 0; i < segments.length; i++) {
+        if (i > 0) result += ',';
+        result += '"' + escapeJson(segments[i]) + '"';
+    }
+    result += ']}';
+    return result;
+}
+
 async function runSingleThreaded(args: Args, linesToProcess: string[]): Promise<string[]> {
     console.log("Running single-threaded...");
     const dictionary = new Dictionary();
     await dictionary.load(args.dict, args.freq);
     const segmenter = new KhmerSegmenter(dictionary);
 
-    const results: string[] = [];
+    const results: string[] = new Array(linesToProcess.length);
     for (let i = 0; i < linesToProcess.length; i++) {
         const line = linesToProcess[i];
         const segments = segmenter.segment(line);
-        const record = JSON.stringify({
-            id: i,
-            input: line,
-            segments: segments
-        });
-        results.push(record);
+        results[i] = toJson(i, line, segments);
     }
     return results;
 }

@@ -5,71 +5,91 @@ import {
 } from './constants';
 import { applyHeuristics, postProcessUnknowns } from './heuristics';
 
+// Pre-compile regex once (faster than creating each time)
+const ZWSP_CODE = 0x200B;
+
 export class KhmerSegmenter {
     dictionary: Dictionary;
+    // Pre-allocated buffers (reused per-call for single-threaded, not thread-safe for parallel)
+    private dpCost: Float32Array;
+    private dpParent: Int32Array;
 
     constructor(dictionary: Dictionary) {
         this.dictionary = dictionary;
+        // Pre-allocate reasonable initial size
+        this.dpCost = new Float32Array(1024);
+        this.dpParent = new Int32Array(1024);
     }
 
     segment(text: string): string[] {
-        // 1. Strip ZWS
-        const textRaw = text.replace(/\u200b/g, "");
+        // 1. Strip ZWS - manual loop is faster than regex for single-char removal
+        let textRaw = '';
+        for (let i = 0; i < text.length; i++) {
+            if (text.charCodeAt(i) !== ZWSP_CODE) {
+                textRaw += text.charAt(i);
+            }
+        }
         if (!textRaw) return [];
 
-        // 2. Prepare Data Structures
-        // Optimization: Work directly on string (UTF-16 code units) instead of splitting to array.
-        // Khmer characters are in BMP (Basic Multilingual Plane), so 1 char === 1 code unit.
-        // This avoids O(N) array creation and reduces memory usage.
         const n = textRaw.length;
 
-        // DP Array: (cost, parent_index)
-        // Initialize with Infinity
-        const dpCost = new Float32Array(n + 1).fill(Infinity);
-        const dpParent = new Int32Array(n + 1).fill(-1);
+        // 2. Ensure buffers are large enough
+        if (this.dpCost.length < n + 1) {
+            this.dpCost = new Float32Array(n + 128);
+            this.dpParent = new Int32Array(n + 128);
+        }
+
+        // Reset arrays
+        const dpCost = this.dpCost;
+        const dpParent = this.dpParent;
+        for (let i = 0; i <= n; i++) {
+            dpCost[i] = Infinity;
+            dpParent[i] = -1;
+        }
 
         dpCost[0] = 0.0;
-        dpParent[0] = -1;
+
+        // Cache frequently used values
+        const maxWordLen = this.dictionary.maxWordLength;
+        const unknownCost = this.dictionary.unknownCost;
 
         for (let i = 0; i < n; i++) {
             if (dpCost[i] === Infinity) continue;
 
             const currentCost = dpCost[i];
+            const charCode = textRaw.charCodeAt(i);
 
             // --- Constraint Checks & Fallback (Repair Mode) ---
             let forceRepair = false;
 
-            // 1. Previous char was Coeng (\u17D2)
-            if (i > 0 && textRaw[i-1] === '\u17D2') {
+            // 1. Previous char was Coeng (0x17D2)
+            if (i > 0 && textRaw.charCodeAt(i - 1) === 0x17D2) {
                 forceRepair = true;
             }
 
-            // 2. Current char is Dependent Vowel
-            if (isDependentVowel(textRaw[i])) {
+            // 2. Current char is Dependent Vowel (0x17B6 - 0x17C5)
+            if (charCode >= 0x17B6 && charCode <= 0x17C5) {
                 forceRepair = true;
             }
 
             if (forceRepair) {
-                // Recovery Mode: Consume 1 char with high penalty
                 const nextIdx = i + 1;
-                const newCost = currentCost + this.dictionary.unknownCost + 50.0;
-                if (nextIdx <= n) {
-                    if (newCost < dpCost[nextIdx]) {
-                        dpCost[nextIdx] = newCost;
-                        dpParent[nextIdx] = i;
-                    }
+                const newCost = currentCost + unknownCost + 50.0;
+                if (nextIdx <= n && newCost < dpCost[nextIdx]) {
+                    dpCost[nextIdx] = newCost;
+                    dpParent[nextIdx] = i;
                 }
                 continue;
             }
 
             // --- Normal Processing ---
+            const charI = textRaw.charAt(i);
 
             // 1. Number / Digit Grouping (and Currency)
-            const charI = textRaw[i];
             const isDigitChar = isDigit(charI);
             let isCurrencyStart = false;
             if (isCurrencySymbol(charI)) {
-                if (i + 1 < n && isDigit(textRaw[i+1])) {
+                if (i + 1 < n && isDigit(textRaw.charAt(i + 1))) {
                     isCurrencyStart = true;
                 }
             }
@@ -105,10 +125,9 @@ export class KhmerSegmenter {
             }
 
             // 4. Dictionary Match - OPTIMIZED: use Trie lookup (no substring allocation)
-            const endLimit = Math.min(n, i + this.dictionary.maxWordLength);
+            const endLimit = Math.min(n, i + maxWordLen);
 
             for (let j = i + 1; j <= endLimit; j++) {
-                // Use Trie range lookup instead of substring + Map lookup
                 const wordCost = this.dictionary.lookupRange(textRaw, i, j);
 
                 if (wordCost >= 0) {
@@ -123,7 +142,7 @@ export class KhmerSegmenter {
             // 5. Unknown Cluster Fallback
             if (isKhmerChar(charI)) {
                 const clusterLen = this.getKhmerClusterLength(textRaw, i);
-                let stepCost = this.dictionary.unknownCost;
+                let stepCost = unknownCost;
 
                 if (clusterLen === 1) {
                     if (!isValidSingleWord(charI)) {
@@ -141,7 +160,7 @@ export class KhmerSegmenter {
             } else {
                 // Non-Khmer
                 const clusterLen = 1;
-                const stepCost = this.dictionary.unknownCost;
+                const stepCost = unknownCost;
                 const nextIdx = i + clusterLen;
                 if (nextIdx <= n) {
                     if (currentCost + stepCost < dpCost[nextIdx]) {
@@ -161,7 +180,6 @@ export class KhmerSegmenter {
                 console.error(`Error: Could not segment text. Stuck at index ${curr}`);
                 break;
             }
-            // Reconstruct segment from textRaw substring
             segments.push(textRaw.substring(prev, curr));
             curr = prev;
         }
