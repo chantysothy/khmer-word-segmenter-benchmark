@@ -9,11 +9,54 @@ import (
 	"strings"
 )
 
-// TrieNode represents a node in the trie for fast rune-based lookup
+const (
+	khmerStart = 0x1780
+	khmerEnd   = 0x17FF
+	khmerRange = khmerEnd - khmerStart + 1 // 128
+)
+
+// TrieNode represents a node in the trie with flat array optimization for Khmer range
 type TrieNode struct {
-	children map[rune]*TrieNode
-	isWord   bool
-	cost     float32
+	// Flat array for O(1) Khmer character lookup (0x1780-0x17FF)
+	khmerChildren [khmerRange]*TrieNode
+	// Fallback map for non-Khmer characters
+	otherChildren map[rune]*TrieNode
+	isWord        bool
+	cost          float32
+}
+
+// getChild returns child for rune using O(1) array access for Khmer range
+//
+//go:inline
+func (n *TrieNode) getChild(r rune) *TrieNode {
+	if r >= khmerStart && r <= khmerEnd {
+		return n.khmerChildren[r-khmerStart]
+	}
+	if n.otherChildren == nil {
+		return nil
+	}
+	return n.otherChildren[r]
+}
+
+// getOrCreateChild gets or creates child using O(1) array access for Khmer range
+func (n *TrieNode) getOrCreateChild(r rune) *TrieNode {
+	if r >= khmerStart && r <= khmerEnd {
+		idx := r - khmerStart
+		if n.khmerChildren[idx] == nil {
+			n.khmerChildren[idx] = &TrieNode{}
+		}
+		return n.khmerChildren[idx]
+	}
+	// Non-Khmer: use map
+	if n.otherChildren == nil {
+		n.otherChildren = make(map[rune]*TrieNode)
+	}
+	child, exists := n.otherChildren[r]
+	if !exists {
+		child = &TrieNode{}
+		n.otherChildren[r] = child
+	}
+	return child
 }
 
 // Dictionary holds the word set and frequency costs
@@ -23,13 +66,13 @@ type Dictionary struct {
 	MaxWordLength int
 	DefaultCost   float32
 	UnknownCost   float32
-	// Trie for fast rune-slice lookups
+	// Optimized Trie for fast rune lookups
 	trie *TrieNode
 }
 
 const minFreqFloor = 5.0
 
-// Precompiled patterns as simple string operations (avoid regex in hot path)
+// Precompiled patterns as simple string operations
 var (
 	coengTa = "\u17D2\u178F"
 	coengDa = "\u17D2\u178D"
@@ -44,7 +87,7 @@ func NewDictionary() *Dictionary {
 		MaxWordLength: 0,
 		DefaultCost:   10.0,
 		UnknownCost:   20.0,
-		trie:          &TrieNode{children: make(map[rune]*TrieNode)},
+		trie:          &TrieNode{},
 	}
 }
 
@@ -180,7 +223,7 @@ func (d *Dictionary) generateVariants(word string) []string {
 		variants[strings.ReplaceAll(word, coengDa, coengTa)] = true
 	}
 
-	// 2. Coeng Ro ordering swaps (simplified without regex)
+	// 2. Coeng Ro ordering swaps
 	baseSet := make(map[string]bool)
 	baseSet[word] = true
 	for v := range variants {
@@ -214,7 +257,7 @@ func swapCoengRoOrder(word string) string {
 	changed := false
 
 	for i < n {
-		// Look for pattern: Coeng + Ro + Coeng + X (swap to Coeng + X + Coeng + Ro)
+		// Look for pattern: Coeng + Ro + Coeng + X
 		if i+3 < n &&
 			runes[i] == 0x17D2 && runes[i+1] == 0x179A &&
 			runes[i+2] == 0x17D2 && runes[i+3] != 0x179A {
@@ -223,7 +266,7 @@ func swapCoengRoOrder(word string) string {
 			changed = true
 			continue
 		}
-		// Look for pattern: Coeng + X + Coeng + Ro (swap to Coeng + Ro + Coeng + X)
+		// Look for pattern: Coeng + X + Coeng + Ro
 		if i+3 < n &&
 			runes[i] == 0x17D2 && runes[i+1] != 0x179A &&
 			runes[i+2] == 0x17D2 && runes[i+3] == 0x179A {
@@ -293,7 +336,7 @@ func (d *Dictionary) loadFrequencies(path string) error {
 	return nil
 }
 
-// buildTrie builds the trie from the dictionary for fast lookups
+// buildTrie builds the optimized trie from the dictionary
 func (d *Dictionary) buildTrie() {
 	for word := range d.Words {
 		cost := d.GetWordCost(word)
@@ -305,27 +348,20 @@ func (d *Dictionary) buildTrie() {
 func (d *Dictionary) insertIntoTrie(word string, cost float32) {
 	node := d.trie
 	for _, r := range word {
-		if node.children == nil {
-			node.children = make(map[rune]*TrieNode)
-		}
-		if _, exists := node.children[r]; !exists {
-			node.children[r] = &TrieNode{children: make(map[rune]*TrieNode)}
-		}
-		node = node.children[r]
+		node = node.getOrCreateChild(r)
 	}
 	node.isWord = true
 	node.cost = cost
 }
 
-// LookupRunes looks up a rune slice in the trie and returns (cost, found)
-func (d *Dictionary) LookupRunes(runes []rune) (float32, bool) {
+// LookupRuneRange looks up a slice range in the trie (zero allocation)
+//
+//go:inline
+func (d *Dictionary) LookupRuneRange(runes []rune, start, end int) (float32, bool) {
 	node := d.trie
-	for _, r := range runes {
-		if node.children == nil {
-			return 0, false
-		}
-		child, exists := node.children[r]
-		if !exists {
+	for i := start; i < end; i++ {
+		child := node.getChild(runes[i])
+		if child == nil {
 			return 0, false
 		}
 		node = child
@@ -334,6 +370,11 @@ func (d *Dictionary) LookupRunes(runes []rune) (float32, bool) {
 		return node.cost, true
 	}
 	return 0, false
+}
+
+// LookupRunes looks up a rune slice in the trie and returns (cost, found)
+func (d *Dictionary) LookupRunes(runes []rune) (float32, bool) {
+	return d.LookupRuneRange(runes, 0, len(runes))
 }
 
 // Contains checks if a word is in the dictionary

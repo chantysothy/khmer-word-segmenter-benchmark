@@ -8,9 +8,13 @@ import java.util.*;
 
 /**
  * Dictionary and frequency model for Khmer word segmentation.
- * Optimized with Trie for fast codepoint-based lookups.
+ * Optimized with Trie using flat array for Khmer Unicode range.
  */
 public class Dictionary {
+
+    private static final int KHMER_START = 0x1780;
+    private static final int KHMER_END = 0x17FF;
+    private static final int KHMER_RANGE = KHMER_END - KHMER_START + 1; // 128
 
     private final Set<String> words;
     private final Map<String, Float> wordCosts;
@@ -272,15 +276,16 @@ public class Dictionary {
     }
 
     /**
-     * Lookup codepoints in trie. Returns cost if found, null otherwise.
+     * Lookup codepoints in trie. Returns cost if found, -1 otherwise.
+     * Uses primitive float with -1 sentinel to avoid boxing overhead.
      */
-    public Float lookupCodepoints(int[] cps, int start, int end) {
+    public float lookupCodepoints(int[] cps, int start, int end) {
         TrieNode node = trie;
         for (int i = start; i < end; i++) {
             node = node.getChild(cps[i]);
-            if (node == null) return null;
+            if (node == null) return -1f;
         }
-        return node.isWord ? node.cost : null;
+        return node.isWord ? node.cost : -1f;
     }
 
     /**
@@ -381,22 +386,42 @@ public class Dictionary {
     }
 
     /**
-     * Trie node for efficient codepoint-based dictionary lookup.
+     * Trie node with flat array optimization for Khmer Unicode range.
+     * Uses O(1) array access for characters in 0x1780-0x17FF range.
      */
     private static class TrieNode {
-        private Map<Integer, TrieNode> children;
+        // Flat array for O(1) Khmer character lookup (128 elements)
+        private TrieNode[] khmerChildren;
+        // Fallback map for non-Khmer characters
+        private Map<Integer, TrieNode> otherChildren;
+
         boolean isWord = false;
         float cost = 0;
 
         TrieNode getChild(int codepoint) {
-            return children == null ? null : children.get(codepoint);
+            if (codepoint >= KHMER_START && codepoint <= KHMER_END) {
+                if (khmerChildren == null) return null;
+                return khmerChildren[codepoint - KHMER_START];
+            }
+            return otherChildren == null ? null : otherChildren.get(codepoint);
         }
 
         TrieNode getOrCreateChild(int codepoint) {
-            if (children == null) {
-                children = new HashMap<>();
+            if (codepoint >= KHMER_START && codepoint <= KHMER_END) {
+                if (khmerChildren == null) {
+                    khmerChildren = new TrieNode[KHMER_RANGE];
+                }
+                int idx = codepoint - KHMER_START;
+                if (khmerChildren[idx] == null) {
+                    khmerChildren[idx] = new TrieNode();
+                }
+                return khmerChildren[idx];
             }
-            return children.computeIfAbsent(codepoint, k -> new TrieNode());
+            // Non-Khmer: use map
+            if (otherChildren == null) {
+                otherChildren = new HashMap<>();
+            }
+            return otherChildren.computeIfAbsent(codepoint, k -> new TrieNode());
         }
     }
 }

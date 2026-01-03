@@ -135,14 +135,14 @@ func (s *KhmerSegmenter) Segment(text string) []string {
 			}
 		}
 
-		// 4. Dictionary Match - OPTIMIZED: use rune slice lookup
+		// 4. Dictionary Match - OPTIMIZED: use range-based lookup (no slice allocation)
 		endLimit := i + maxWordLen
 		if endLimit > n {
 			endLimit = n
 		}
 		for j := i + 1; j <= endLimit; j++ {
-			// Use direct rune slice lookup instead of string conversion
-			if wordCost, ok := dict.LookupRunes(runes[i:j]); ok {
+			// Use direct range lookup without creating a slice
+			if wordCost, ok := dict.LookupRuneRange(runes, i, j); ok {
 				newCost := currentCost + wordCost
 				if newCost < dpCost[j] {
 					dpCost[j] = newCost

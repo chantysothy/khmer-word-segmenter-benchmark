@@ -5,6 +5,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 /**
  * CLI entry point for Khmer Segmenter.
@@ -18,6 +20,7 @@ public class Main {
         String inputPath = null;
         String outputPath = null;
         Integer limit = null;
+        int threads = 0; // 0 = use all available
 
         // Parse arguments
         for (int i = 0; i < args.length; i++) {
@@ -42,6 +45,10 @@ public class Main {
                 case "-l":
                     limit = Integer.parseInt(args[++i]);
                     break;
+                case "--threads":
+                case "-t":
+                    threads = Integer.parseInt(args[++i]);
+                    break;
             }
         }
 
@@ -51,11 +58,12 @@ public class Main {
             System.err.println("  --dict, -d <path>   Path to dictionary file");
             System.err.println("  --freq, -f <path>   Path to frequency file");
             System.err.println("  --limit, -l <n>     Limit number of lines to process");
+            System.err.println("  --threads, -t <n>   Number of threads (0 = auto)");
             System.exit(1);
         }
 
         try {
-            run(dictPath, freqPath, inputPath, outputPath, limit);
+            run(dictPath, freqPath, inputPath, outputPath, limit, threads);
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
@@ -63,7 +71,7 @@ public class Main {
         }
     }
 
-    private static void run(String dictPath, String freqPath, String inputPath, String outputPath, Integer limit) throws IOException {
+    private static void run(String dictPath, String freqPath, String inputPath, String outputPath, Integer limit, int threads) throws IOException {
         System.out.println("Initializing Java Segmenter...");
         System.out.println("Dictionary: " + dictPath);
         System.out.println("Frequencies: " + freqPath);
@@ -72,7 +80,6 @@ public class Main {
 
         Dictionary dictionary = new Dictionary();
         dictionary.load(dictPath, freqPath);
-        KhmerSegmenter segmenter = new KhmerSegmenter(dictionary);
 
         long loadTime = System.currentTimeMillis() - startLoad;
         System.out.printf("Model loaded in %.2fs%n", loadTime / 1000.0);
@@ -89,30 +96,32 @@ public class Main {
             }
         }
 
-        System.out.println("Processing " + lines.size() + " lines...");
+        int numLines = lines.size();
+        int numThreads = threads > 0 ? threads : Runtime.getRuntime().availableProcessors();
+        System.out.println("Processing " + numLines + " lines with " + numThreads + " threads...");
 
         long startProcess = System.currentTimeMillis();
 
-        try (BufferedWriter writer = Files.newBufferedWriter(Path.of(outputPath), StandardCharsets.UTF_8)) {
-            for (int i = 0; i < lines.size(); i++) {
+        // Pre-allocate result array for parallel processing
+        String[] results = new String[numLines];
+
+        // Use parallel stream for processing
+        // ThreadLocal segmenter ensures each thread has its own instance
+        ThreadLocal<KhmerSegmenter> segmenterLocal = ThreadLocal.withInitial(() -> new KhmerSegmenter(dictionary));
+
+        IntStream.range(0, numLines)
+            .parallel()
+            .forEach(i -> {
                 String line = lines.get(i).trim();
+                KhmerSegmenter segmenter = segmenterLocal.get();
                 List<String> segments = segmenter.segment(line);
+                results[i] = toJson(i, line, segments);
+            });
 
-                // Write as JSON manually
-                writer.write("{\"id\":");
-                writer.write(String.valueOf(i));
-                writer.write(",\"input\":\"");
-                writer.write(escapeJson(line));
-                writer.write("\",\"segments\":[");
-
-                for (int j = 0; j < segments.size(); j++) {
-                    if (j > 0) writer.write(",");
-                    writer.write("\"");
-                    writer.write(escapeJson(segments.get(j)));
-                    writer.write("\"");
-                }
-
-                writer.write("]}");
+        // Write results sequentially
+        try (BufferedWriter writer = Files.newBufferedWriter(Path.of(outputPath), StandardCharsets.UTF_8)) {
+            for (String json : results) {
+                writer.write(json);
                 writer.newLine();
             }
         }
@@ -122,7 +131,20 @@ public class Main {
 
         System.out.println("Done. Saved to " + outputPath);
         System.out.printf("Time taken: %.2fs%n", duration);
-        System.out.printf("Speed: %.2f lines/sec%n", lines.size() / duration);
+        System.out.printf("Speed: %.2f lines/sec%n", numLines / duration);
+    }
+
+    private static String toJson(int id, String input, List<String> segments) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"id\":").append(id);
+        sb.append(",\"input\":\"").append(escapeJson(input)).append("\"");
+        sb.append(",\"segments\":[");
+        for (int j = 0; j < segments.size(); j++) {
+            if (j > 0) sb.append(",");
+            sb.append("\"").append(escapeJson(segments.get(j))).append("\"");
+        }
+        sb.append("]}");
+        return sb.toString();
     }
 
     private static String escapeJson(String s) {

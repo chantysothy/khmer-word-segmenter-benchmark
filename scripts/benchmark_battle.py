@@ -36,10 +36,10 @@ def generate_workload():
         "បានថ្លែងថា ភាពជោគជ័យផ្នែកហិរញ្ញវត្ថុនាឆ្នាំនេះ គឺជាសក្ខីភាពនៃកិច្ចខិតខំប្រឹងប្រែងរបស់ក្រុមការងារទាំងមូល "
         "និងការជឿទុកចិត្តពីសំណាក់វិនិយោគិន។"
     )
-    # Repeat 1000 times to create a decent workload
-    print("Generating workload (1000 lines)...")
+    # Repeat 10000 times to create a decent workload
+    print("Generating workload (10000 lines)...")
     with open(TEMP_INPUT, 'w', encoding='utf-8') as f:
-        for _ in range(1000):
+        for _ in range(10000):
             f.write(text + "\n")
 
     file_size_kb = os.path.getsize(TEMP_INPUT) / 1024
@@ -263,8 +263,8 @@ def benchmark_java():
     # Find java executable
     java_exe = "java"
     java_paths = [
-        r"C:\Program Files\Zulu\zulu-17\bin\java.exe",
         r"C:\Program Files\Zulu\zulu-21\bin\java.exe",
+        r"C:\Program Files\Zulu\zulu-17\bin\java.exe",
         r"C:\Program Files\Java\jdk-17\bin\java.exe",
     ]
     for jp in java_paths:

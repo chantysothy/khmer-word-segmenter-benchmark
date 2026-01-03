@@ -6,11 +6,16 @@ import java.util.Set;
  * Unicode character classification utilities for Khmer script.
  * Khmer Unicode Block: U+1780 - U+17FF (main), U+19E0 - U+19FF (symbols)
  *
- * Optimized to work with both char and int (codepoint) parameters.
+ * Optimized with boolean lookup tables for hot paths.
  */
 public final class Constants {
 
     private Constants() {} // Utility class
+
+    // Khmer Unicode range constants
+    private static final int KHMER_START = 0x1780;
+    private static final int KHMER_END = 0x17FF;
+    private static final int KHMER_RANGE = KHMER_END - KHMER_START + 1; // 128
 
     // Valid single-character words (Consonants and Independent Vowels that can stand alone)
     public static final Set<Character> VALID_SINGLE_WORDS = Set.of(
@@ -19,19 +24,29 @@ public final class Constants {
         '\u17AC', '\u17AE', '\u17AA', '\u17AF', '\u17B1', '\u17A6', '\u17A7', '\u17B3'  // Independent Vowels
     );
 
-    // Valid single word codepoints (for fast int lookup)
-    private static final int[] VALID_SINGLE_CPS = {
-        0x1780, 0x1781, 0x1782, 0x1784, 0x1785, 0x1786, 0x1789,
-        0x178A, 0x178F, 0x1791, 0x1796, 0x179A, 0x179B, 0x179F, 0x17A1,
-        0x17AC, 0x17AE, 0x17AA, 0x17AF, 0x17B1, 0x17A6, 0x17A7, 0x17B3
-    };
+    // Lookup table for valid single words in Khmer range (O(1) lookup)
+    private static final boolean[] VALID_SINGLE_LOOKUP = new boolean[KHMER_RANGE];
+    static {
+        int[] validCps = {
+            0x1780, 0x1781, 0x1782, 0x1784, 0x1785, 0x1786, 0x1789,
+            0x178A, 0x178F, 0x1791, 0x1796, 0x179A, 0x179B, 0x179F, 0x17A1,
+            0x17AC, 0x17AE, 0x17AA, 0x17AF, 0x17B1, 0x17A6, 0x17A7, 0x17B3
+        };
+        for (int cp : validCps) {
+            VALID_SINGLE_LOOKUP[cp - KHMER_START] = true;
+        }
+    }
 
-    // Currency symbol codepoints
-    private static final int[] CURRENCY_CPS = {
-        '$', 0x17DB, 0x20AC, 0x00A3, 0x00A5 // $, ៛, €, £, ¥
-    };
+    // Lookup table for separator chars in ASCII range
+    private static final boolean[] SEPARATOR_ASCII = new boolean[256];
+    static {
+        String separators = "!?.,;:\"'()[]{}-/ $%";
+        for (char c : separators.toCharArray()) {
+            if (c < 256) SEPARATOR_ASCII[c] = true;
+        }
+    }
 
-    // Separator characters
+    // Separator characters (for extended chars)
     public static final String SEPARATOR_CHARS = "!?.,;:\"'()[]{}-/ \u00AB\u00BB\u201C\u201D\u02DD$%";
 
     /**
@@ -85,36 +100,32 @@ public final class Constants {
     }
 
     /**
-     * Check if codepoint is a currency symbol.
+     * Check if codepoint is a currency symbol. (Inline optimized)
      */
     public static boolean isCurrencySymbol(int cp) {
-        for (int c : CURRENCY_CPS) {
-            if (cp == c) return true;
-        }
-        return false;
+        return cp == '$' || cp == 0x17DB || cp == 0x20AC || cp == 0x00A3 || cp == 0x00A5;
     }
 
     /**
-     * Check if codepoint is a separator/punctuation.
+     * Check if codepoint is a separator/punctuation. (Optimized with lookup table)
      */
     public static boolean isSeparator(int cp) {
         // Khmer punctuation range
         if (cp >= 0x17D4 && cp <= 0x17DA) return true;
         // Currency Riel
         if (cp == 0x17DB) return true;
-        // ASCII/General punctuation (only check if in BMP range)
-        if (cp <= 0xFFFF) {
-            return SEPARATOR_CHARS.indexOf((char) cp) >= 0;
-        }
-        return false;
+        // Fast ASCII lookup
+        if (cp < 256) return SEPARATOR_ASCII[cp];
+        // Extended punctuation
+        return cp == 0x00AB || cp == 0x00BB || cp == 0x201C || cp == 0x201D || cp == 0x02DD;
     }
 
     /**
-     * Check if codepoint is a valid single-character word.
+     * Check if codepoint is a valid single-character word. (O(1) lookup)
      */
     public static boolean isValidSingleWord(int cp) {
-        for (int c : VALID_SINGLE_CPS) {
-            if (cp == c) return true;
+        if (cp >= KHMER_START && cp <= KHMER_END) {
+            return VALID_SINGLE_LOOKUP[cp - KHMER_START];
         }
         return false;
     }

@@ -3,17 +3,67 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { isValidSingleWord } from './constants';
 
+// Khmer Unicode range constants for Trie optimization
+const KHMER_START = 0x1780;
+const KHMER_END = 0x17FF;
+const KHMER_RANGE = KHMER_END - KHMER_START + 1; // 128
+
+// Trie node with flat array optimization for Khmer range
+class TrieNode {
+    // Flat array for O(1) Khmer character lookup (0x1780-0x17FF)
+    khmerChildren: (TrieNode | null)[] | null = null;
+    // Fallback map for non-Khmer characters
+    otherChildren: Map<number, TrieNode> | null = null;
+    isWord: boolean = false;
+    cost: number = 0;
+
+    getChild(charCode: number): TrieNode | null {
+        if (charCode >= KHMER_START && charCode <= KHMER_END) {
+            if (!this.khmerChildren) return null;
+            return this.khmerChildren[charCode - KHMER_START];
+        }
+        if (!this.otherChildren) return null;
+        return this.otherChildren.get(charCode) || null;
+    }
+
+    getOrCreateChild(charCode: number): TrieNode {
+        if (charCode >= KHMER_START && charCode <= KHMER_END) {
+            if (!this.khmerChildren) {
+                this.khmerChildren = new Array(KHMER_RANGE).fill(null);
+            }
+            const idx = charCode - KHMER_START;
+            if (!this.khmerChildren[idx]) {
+                this.khmerChildren[idx] = new TrieNode();
+            }
+            return this.khmerChildren[idx]!;
+        }
+        // Non-Khmer: use map
+        if (!this.otherChildren) {
+            this.otherChildren = new Map();
+        }
+        let child = this.otherChildren.get(charCode);
+        if (!child) {
+            child = new TrieNode();
+            this.otherChildren.set(charCode, child);
+        }
+        return child;
+    }
+}
+
 export class Dictionary {
     words: Map<string, number>; // Maps word -> cost
     maxWordLength: number;
     defaultCost: number;
     unknownCost: number;
+    // Optimized Trie for fast lookups
+    private trie: TrieNode;
 
     constructor() {
         this.words = new Map();
         this.maxWordLength = 0;
         this.defaultCost = 10.0;
         this.unknownCost = 20.0;
+        this.trie = new TrieNode();
     }
 
     async load(dictPath: string, freqPath: string): Promise<void> {
@@ -32,6 +82,9 @@ export class Dictionary {
 
         // 2. Load Frequencies & Calculate Costs
         await this.calculateCosts(freqPath, tempWords);
+
+        // 3. Build Trie from dictionary
+        this.buildTrie();
     }
 
     private async loadWords(filePath: string, wordsSet: Set<string>): Promise<void> {
@@ -241,5 +294,34 @@ export class Dictionary {
         }
 
         return variants;
+    }
+
+    // Build Trie from dictionary words
+    private buildTrie(): void {
+        for (const [word, cost] of this.words) {
+            this.insertIntoTrie(word, cost);
+        }
+    }
+
+    // Insert word into Trie
+    private insertIntoTrie(word: string, cost: number): void {
+        let node = this.trie;
+        for (let i = 0; i < word.length; i++) {
+            const charCode = word.charCodeAt(i);
+            node = node.getOrCreateChild(charCode);
+        }
+        node.isWord = true;
+        node.cost = cost;
+    }
+
+    // Lookup text range in Trie (zero allocation) - returns cost or -1 if not found
+    lookupRange(text: string, start: number, end: number): number {
+        let node: TrieNode | null = this.trie;
+        for (let i = start; i < end; i++) {
+            const charCode = text.charCodeAt(i);
+            node = node.getChild(charCode);
+            if (!node) return -1;
+        }
+        return node.isWord ? node.cost : -1;
     }
 }

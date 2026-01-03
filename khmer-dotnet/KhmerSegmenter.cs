@@ -1,11 +1,18 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace KhmerSegmenter
 {
     public class KhmerSegmenter
     {
         private Dictionary dictionary;
+
+        // Thread-local buffers to avoid allocation in hot path
+        [ThreadStatic]
+        private static float[]? s_dpCost;
+        [ThreadStatic]
+        private static int[]? s_dpParent;
 
         public KhmerSegmenter(Dictionary dictionary)
         {
@@ -20,12 +27,19 @@ namespace KhmerSegmenter
 
             int n = textRaw.Length;
 
-            // DP Arrays
-            float[] dpCost = new float[n + 1];
-            int[] dpParent = new int[n + 1];
+            // Convert to char array once for zero-allocation lookups
+            char[] chars = textRaw.ToCharArray();
 
-            Array.Fill(dpCost, float.PositiveInfinity);
-            Array.Fill(dpParent, -1);
+            // Use thread-local buffers or allocate if needed
+            float[] dpCost = GetOrCreateBuffer(ref s_dpCost, n + 1);
+            int[] dpParent = GetOrCreateBuffer(ref s_dpParent, n + 1);
+
+            // Reset buffers
+            for (int i = 0; i <= n; i++)
+            {
+                dpCost[i] = float.PositiveInfinity;
+                dpParent[i] = -1;
+            }
 
             dpCost[0] = 0.0f;
             dpParent[0] = -1;
@@ -40,13 +54,13 @@ namespace KhmerSegmenter
                 bool forceRepair = false;
 
                 // 1. Previous char was Coeng (\u17D2)
-                if (i > 0 && textRaw[i - 1] == '\u17D2')
+                if (i > 0 && chars[i - 1] == '\u17D2')
                 {
                     forceRepair = true;
                 }
 
                 // 2. Current char is Dependent Vowel
-                if (Constants.IsDependentVowel(textRaw[i]))
+                if (Constants.IsDependentVowel(chars[i]))
                 {
                     forceRepair = true;
                 }
@@ -70,13 +84,13 @@ namespace KhmerSegmenter
                 // --- Normal Processing ---
 
                 // 1. Number / Digit Grouping (and Currency)
-                char charI = textRaw[i];
+                char charI = chars[i];
                 bool isDigitChar = Constants.IsDigit(charI);
                 bool isCurrencyStart = false;
 
                 if (Constants.IsCurrencySymbol(charI))
                 {
-                    if (i + 1 < n && Constants.IsDigit(textRaw[i + 1]))
+                    if (i + 1 < n && Constants.IsDigit(chars[i + 1]))
                     {
                         isCurrencyStart = true;
                     }
@@ -84,7 +98,7 @@ namespace KhmerSegmenter
 
                 if (isDigitChar || isCurrencyStart)
                 {
-                    int numLen = GetNumberLength(textRaw, i);
+                    int numLen = GetNumberLength(chars, i, n);
                     int nextIdx = i + numLen;
                     float stepCost = 1.0f;
                     if (nextIdx <= n && currentCost + stepCost < dpCost[nextIdx])
@@ -106,9 +120,9 @@ namespace KhmerSegmenter
                 }
 
                 // 3. Acronyms
-                if (IsAcronymStart(textRaw, i))
+                if (IsAcronymStart(chars, i, n))
                 {
-                    int acrLen = GetAcronymLength(textRaw, i);
+                    int acrLen = GetAcronymLength(chars, i, n);
                     int nextIdx = i + acrLen;
                     float stepCost = 1.0f;
                     if (nextIdx <= n && currentCost + stepCost < dpCost[nextIdx])
@@ -118,20 +132,13 @@ namespace KhmerSegmenter
                     }
                 }
 
-                // 4. Dictionary Match
+                // 4. Dictionary Match - Use trie for zero-allocation lookup
                 int endLimit = Math.Min(n, i + dictionary.MaxWordLength);
                 for (int j = i + 1; j <= endLimit; j++)
                 {
-                    // Substring optimization:
-                    // In C#, Substring allocates. For max speed, we might want Span lookup,
-                    // but Dictionary<string> requires string.
-                    // If .NET 9+, we could use AlternateLookup with ReadOnlySpan<char>.
-                    // For now, let's stick to Substring for compatibility/port simplicity.
-                    string word = textRaw.Substring(i, j - i);
-
-                    if (dictionary.Contains(word))
+                    // Zero-allocation trie lookup using char array range
+                    if (dictionary.TryGetCost(chars, i, j, out float wordCost))
                     {
-                        float wordCost = dictionary.GetWordCost(word);
                         float newCost = currentCost + wordCost;
                         if (newCost < dpCost[j])
                         {
@@ -144,7 +151,7 @@ namespace KhmerSegmenter
                 // 5. Unknown Cluster Fallback
                 if (Constants.IsKhmerChar(charI))
                 {
-                    int clusterLen = GetKhmerClusterLength(textRaw, i);
+                    int clusterLen = GetKhmerClusterLength(chars, i, n);
                     float stepCost = dictionary.UnknownCost;
 
                     if (clusterLen == 1)
@@ -193,7 +200,7 @@ namespace KhmerSegmenter
                     Console.Error.WriteLine($"Error: Could not segment text. Stuck at index {curr}");
                     break;
                 }
-                segments.Add(textRaw.Substring(prev, curr - prev));
+                segments.Add(new string(chars, prev, curr - prev));
                 curr = prev;
             }
             segments.Reverse();
@@ -279,15 +286,25 @@ namespace KhmerSegmenter
             return Heuristics.PostProcessUnknowns(pass2Segments, dictionary);
         }
 
-        // Helpers
+        // Helpers using char arrays
 
-        private int GetKhmerClusterLength(string text, int startIndex)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static T[] GetOrCreateBuffer<T>(ref T[]? buffer, int minSize)
         {
-            int n = text.Length;
+            if (buffer == null || buffer.Length < minSize)
+            {
+                buffer = new T[minSize];
+            }
+            return buffer;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private int GetKhmerClusterLength(char[] chars, int startIndex, int n)
+        {
             if (startIndex >= n) return 0;
 
             int i = startIndex;
-            char c = text[i];
+            char c = chars[i];
 
             // Check for Base Consonant or Independent Vowel
             if (!((c >= 0x1780 && c <= 0x17B3)))
@@ -298,13 +315,13 @@ namespace KhmerSegmenter
 
             while (i < n)
             {
-                char current = text[i];
+                char current = chars[i];
 
                 if (Constants.IsCoeng(current))
                 {
                     if (i + 1 < n)
                     {
-                        char nextC = text[i + 1];
+                        char nextC = chars[i + 1];
                         if (Constants.IsConsonant(nextC))
                         {
                             i += 2;
@@ -326,17 +343,17 @@ namespace KhmerSegmenter
             return i - startIndex;
         }
 
-        private int GetNumberLength(string text, int startIndex)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private int GetNumberLength(char[] chars, int startIndex, int n)
         {
-            int n = text.Length;
             int i = startIndex;
 
-            if (!Constants.IsDigit(text[i])) return 0;
+            if (!Constants.IsDigit(chars[i])) return 0;
             i++;
 
             while (i < n)
             {
-                char c = text[i];
+                char c = chars[i];
                 if (Constants.IsDigit(c))
                 {
                     i++;
@@ -344,7 +361,7 @@ namespace KhmerSegmenter
                 }
                 if (c == ',' || c == '.' || c == ' ')
                 {
-                    if (i + 1 < n && Constants.IsDigit(text[i + 1]))
+                    if (i + 1 < n && Constants.IsDigit(chars[i + 1]))
                     {
                         i += 2;
                         continue;
@@ -355,18 +372,18 @@ namespace KhmerSegmenter
             return i - startIndex;
         }
 
-        private int GetAcronymLength(string text, int startIndex)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private int GetAcronymLength(char[] chars, int startIndex, int n)
         {
-            int n = text.Length;
             int i = startIndex;
 
             while (true)
             {
-                int clusterLen = GetKhmerClusterLength(text, i);
+                int clusterLen = GetKhmerClusterLength(chars, i, n);
                 if (clusterLen > 0)
                 {
                     int dotIndex = i + clusterLen;
-                    if (dotIndex < n && text[dotIndex] == '.')
+                    if (dotIndex < n && chars[dotIndex] == '.')
                     {
                         i = dotIndex + 1;
                         if (i >= n) break;
@@ -378,16 +395,16 @@ namespace KhmerSegmenter
             return i - startIndex;
         }
 
-        private bool IsAcronymStart(string text, int index)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool IsAcronymStart(char[] chars, int index, int n)
         {
-            int n = text.Length;
             if (index + 1 >= n) return false;
 
-            int clusterLen = GetKhmerClusterLength(text, index);
+            int clusterLen = GetKhmerClusterLength(chars, index, n);
             if (clusterLen == 0) return false;
 
             int dotIndex = index + clusterLen;
-            return dotIndex < n && text[dotIndex] == '.';
+            return dotIndex < n && chars[dotIndex] == '.';
         }
     }
 }

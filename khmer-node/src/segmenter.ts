@@ -104,16 +104,14 @@ export class KhmerSegmenter {
                 }
             }
 
-            // 4. Dictionary Match
+            // 4. Dictionary Match - OPTIMIZED: use Trie lookup (no substring allocation)
             const endLimit = Math.min(n, i + this.dictionary.maxWordLength);
 
-            // Optimization: Use substring instead of repeated string concatenation
             for (let j = i + 1; j <= endLimit; j++) {
-                // substring is fast in V8 (slice of underlying buffer or flat string)
-                const word = textRaw.substring(i, j);
+                // Use Trie range lookup instead of substring + Map lookup
+                const wordCost = this.dictionary.lookupRange(textRaw, i, j);
 
-                if (this.dictionary.contains(word)) {
-                    const wordCost = this.dictionary.getWordCost(word);
+                if (wordCost >= 0) {
                     const newCost = currentCost + wordCost;
                     if (newCost < dpCost[j]) {
                         dpCost[j] = newCost;

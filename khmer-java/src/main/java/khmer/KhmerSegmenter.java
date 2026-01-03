@@ -127,11 +127,11 @@ public class KhmerSegmenter {
                 }
             }
 
-            // 4. Dictionary Match - OPTIMIZED: use trie lookup on codepoints
+            // 4. Dictionary Match - OPTIMIZED: use trie lookup on codepoints (primitive float, -1 sentinel)
             int endLimit = Math.min(n, i + maxWordLen);
             for (int j = i + 1; j <= endLimit; j++) {
-                Float wordCost = dictionary.lookupCodepoints(cps, i, j);
-                if (wordCost != null) {
+                float wordCost = dictionary.lookupCodepoints(cps, i, j);
+                if (wordCost >= 0) {
                     float newCost = currentCost + wordCost;
                     if (newCost < dpCost[j]) {
                         dpCost[j] = newCost;

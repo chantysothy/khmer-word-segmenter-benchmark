@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { performance } from 'perf_hooks';
+import { Worker } from 'worker_threads';
+import * as os from 'os';
 import { Dictionary } from './dictionary';
 import { KhmerSegmenter } from './segmenter';
 
@@ -11,6 +13,7 @@ interface Args {
     input: string;
     output: string;
     limit: number | null;
+    threads: number;
 }
 
 function parseArgs(): Args {
@@ -20,7 +23,8 @@ function parseArgs(): Args {
         freq: path.join(__dirname, '../../data/khmer_word_frequencies.json'),
         input: '',
         output: '',
-        limit: null
+        limit: null,
+        threads: 0 // 0 = auto (use CPU count)
     };
 
     for (let i = 0; i < args.length; i++) {
@@ -35,15 +39,106 @@ function parseArgs(): Args {
             parsed.output = args[++i];
         } else if (arg === '--limit' || arg === '-l') {
             parsed.limit = parseInt(args[++i], 10);
+        } else if (arg === '--threads' || arg === '-t') {
+            parsed.threads = parseInt(args[++i], 10);
         }
     }
 
     if (!parsed.input || !parsed.output) {
         console.error("Usage: node dist/index.js --input <file> --output <file> [options]");
+        console.error("Options:");
+        console.error("  --dict, -d <path>   Path to dictionary file");
+        console.error("  --freq, -f <path>   Path to frequency file");
+        console.error("  --limit, -l <n>     Limit number of lines");
+        console.error("  --threads, -t <n>   Number of worker threads (0 = auto)");
         process.exit(1);
     }
 
     return parsed;
+}
+
+async function runParallel(args: Args, linesToProcess: string[]): Promise<string[]> {
+    const numWorkers = args.threads > 0 ? args.threads : os.cpus().length;
+    console.log(`Using ${numWorkers} worker threads...`);
+
+    const workerPath = path.join(__dirname, 'worker.js');
+    const results: string[] = new Array(linesToProcess.length);
+    const workers: Worker[] = [];
+    const workerPromises: Promise<void>[] = [];
+
+    // Split work into chunks
+    const chunkSize = Math.ceil(linesToProcess.length / numWorkers);
+    let completedChunks = 0;
+
+    for (let w = 0; w < numWorkers; w++) {
+        const startIdx = w * chunkSize;
+        const endIdx = Math.min(startIdx + chunkSize, linesToProcess.length);
+
+        if (startIdx >= linesToProcess.length) break;
+
+        const chunk = linesToProcess.slice(startIdx, endIdx);
+
+        const workerPromise = new Promise<void>((resolve, reject) => {
+            const worker = new Worker(workerPath, {
+                workerData: {
+                    dictPath: args.dict,
+                    freqPath: args.freq
+                }
+            });
+            workers.push(worker);
+
+            worker.on('message', (msg: any) => {
+                if (msg.type === 'ready') {
+                    // Worker is ready, send work
+                    worker.postMessage({
+                        type: 'segment',
+                        lines: chunk,
+                        startId: startIdx
+                    });
+                } else if (msg.type === 'results') {
+                    // Store results
+                    for (let i = 0; i < msg.results.length; i++) {
+                        results[startIdx + i] = msg.results[i];
+                    }
+                    completedChunks++;
+                    worker.terminate();
+                    resolve();
+                }
+            });
+
+            worker.on('error', reject);
+            worker.on('exit', (code) => {
+                if (code !== 0) {
+                    reject(new Error(`Worker exited with code ${code}`));
+                }
+            });
+        });
+
+        workerPromises.push(workerPromise);
+    }
+
+    await Promise.all(workerPromises);
+    return results;
+}
+
+async function runSingleThreaded(args: Args, linesToProcess: string[]): Promise<string[]> {
+    console.log("Running single-threaded...");
+    const dictionary = new Dictionary();
+    await dictionary.load(args.dict, args.freq);
+    const segmenter = new KhmerSegmenter(dictionary);
+
+    const results: string[] = [];
+    for (let i = 0; i < linesToProcess.length; i++) {
+        const line = linesToProcess[i];
+        const segments = segmenter.segment(line);
+        const record = JSON.stringify({
+            id: i,
+            input: line,
+            segments: segments
+        });
+        results.push(record);
+    }
+    return results;
 }
 
 async function main() {
@@ -54,9 +149,11 @@ async function main() {
     console.log(`Frequencies: ${args.freq}`);
 
     const startLoad = performance.now();
-    const dictionary = new Dictionary();
-    await dictionary.load(args.dict, args.freq);
-    const segmenter = new KhmerSegmenter(dictionary);
+
+    // Pre-load dictionary to measure load time
+    const tempDict = new Dictionary();
+    await tempDict.load(args.dict, args.freq);
+
     const loadTime = (performance.now() - startLoad) / 1000;
     console.log(`Model loaded in ${loadTime.toFixed(2)}s`);
 
@@ -73,18 +170,7 @@ async function main() {
         crlfDelay: Infinity
     });
 
-    const outputStream = fs.createWriteStream(args.output);
-
-    let count = 0;
     const linesToProcess: string[] = [];
-
-    // We can stream process, but to measure total time including buffering overhead vs processing:
-    // We'll read all valid lines first like the Rust version does (it did `lines.collect()`).
-    // Or we can process streaming. Rust version loaded all into memory.
-    // To match Rust memory profile comparison, loading all is fair, but streaming is "better" engineering.
-    // However, for "speed" measurement of the *algorithm*, we usually isolate IO.
-    // But end-to-end includes IO.
-    // I will buffer all lines first to match Rust logic `let mut lines: Vec<String> = reader.lines()...`.
 
     for await (const line of rl) {
         const trimmed = line.trim();
@@ -99,17 +185,22 @@ async function main() {
     console.log(`Processing ${linesToProcess.length} lines...`);
     const startProcess = performance.now();
 
-    for (let i = 0; i < linesToProcess.length; i++) {
-        const line = linesToProcess[i];
-        const segments = segmenter.segment(line);
-        const record = JSON.stringify({
-            id: i,
-            input: line,
-            segments: segments
-        });
-        outputStream.write(record + '\n');
+    let results: string[];
+
+    // Use parallel processing if we have enough work and multiple CPUs
+    const useParallel = linesToProcess.length >= 100 && (args.threads === 0 ? os.cpus().length > 1 : args.threads > 1);
+
+    if (useParallel) {
+        results = await runParallel(args, linesToProcess);
+    } else {
+        results = await runSingleThreaded(args, linesToProcess);
     }
 
+    // Write results
+    const outputStream = fs.createWriteStream(args.output);
+    for (const record of results) {
+        outputStream.write(record + '\n');
+    }
     outputStream.end();
 
     const endProcess = performance.now();
