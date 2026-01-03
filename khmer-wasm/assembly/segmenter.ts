@@ -94,25 +94,16 @@ export function segment(text: string): string {
     // Let's implement basic AcronymStart check to match C#.
     // IsAcronymStart...
 
-    // 4. Dictionary Match
+    // 4. Dictionary Match - OPTIMIZED: use Trie lookup (no substring allocation!)
     let maxLen = globalDict.maxWordLength;
     let endLimit = i + maxLen;
     if (endLimit > n) endLimit = n;
 
     for (let j = i + 1; j <= endLimit; j++) {
-      // substring in AS creates a new string.
-      // Optimization: This is the hot path.
-      // globalDict might need a way to check without creating string?
-      // But Map<string> keys are strings.
-      // AS strings are objects.
-      let word = textRaw.substring(i, j);
+      // Use Trie range lookup instead of substring + Map lookup
+      let wordCost = globalDict.lookupRange(textRaw, i, j);
 
-      // In JS, substring is fast (slice). In AS, it allocates.
-      // This is the bottleneck risk for Wasm.
-      // But let's stick to simple logic first.
-
-      if (globalDict.contains(word)) {
-        let wordCost = globalDict.getCost(word);
+      if (wordCost >= 0) {
         let newCost = currentCost + wordCost;
         if (newCost < dpCost[j]) {
           dpCost[j] = newCost;
