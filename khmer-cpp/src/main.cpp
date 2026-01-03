@@ -7,17 +7,28 @@
 #include <omp.h>
 #include <iomanip>
 #include <cstring>
+#include <sstream>
 
-// Simple JSON string escaper
-std::string escape_json(const std::string& s) {
-    std::string out;
-    out.reserve(s.length() + 8);
+// ============================================================================
+// High-performance JSON builder using thread_local buffers
+// Inspired by 1 Billion Row Challenge optimizations
+// ============================================================================
+
+// Cross-platform force inline macro
+#if defined(_MSC_VER)
+    #define FORCE_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+    #define FORCE_INLINE __attribute__((always_inline)) inline
+#else
+    #define FORCE_INLINE inline
+#endif
+
+// Fast inline JSON string escaper - appends directly to buffer
+FORCE_INLINE void escape_json_to(std::string& out, const std::string& s) {
     for (unsigned char c : s) {
         switch (c) {
             case '\"': out += "\\\""; break;
             case '\\': out += "\\\\"; break;
-            case '\b': out += "\\b"; break;
-            case '\f': out += "\\f"; break;
             case '\n': out += "\\n"; break;
             case '\r': out += "\\r"; break;
             case '\t': out += "\\t"; break;
@@ -31,7 +42,35 @@ std::string escape_json(const std::string& s) {
                 }
         }
     }
-    return out;
+}
+
+// Fast JSON record builder with thread_local pre-allocated buffer
+FORCE_INLINE std::string build_json_record(
+    int64_t id,
+    const std::string& input,
+    const std::vector<std::string>& segments
+) {
+    // Thread-local buffer to avoid allocation overhead
+    thread_local std::string buffer;
+    buffer.clear();
+    buffer.reserve(512);
+
+    // Build: {"id":N,"input":"...","segments":["...", ...]}
+    buffer += "{\"id\":";
+    buffer += std::to_string(id);
+    buffer += ",\"input\":\"";
+    escape_json_to(buffer, input);
+    buffer += "\",\"segments\":[";
+
+    for (size_t i = 0; i < segments.size(); ++i) {
+        if (i > 0) buffer += ',';
+        buffer += '"';
+        escape_json_to(buffer, segments[i]);
+        buffer += '"';
+    }
+
+    buffer += "]}";
+    return buffer;
 }
 
 struct Args {
@@ -123,19 +162,8 @@ int main(int argc, char* argv[]) {
     #pragma omp parallel for schedule(dynamic, 100)
     for (int64_t i = 0; i < static_cast<int64_t>(lines.size()); ++i) {
         auto segments = segmenter.segment(lines[i]);
-
-        // Build JSON output: ["seg1", "seg2", ...]
-        std::string json;
-        json.reserve(lines[i].size() * 2); // heuristic
-        json += "[";
-        for (size_t j = 0; j < segments.size(); ++j) {
-            if (j > 0) json += ", ";
-            json += "\"";
-            json += escape_json(segments[j]);
-            json += "\"";
-        }
-        json += "]";
-        results[i] = std::move(json);
+        // Use fast JSON builder with thread_local buffer
+        results[i] = build_json_record(i, lines[i], segments);
     }
 
     auto end_proc = std::chrono::high_resolution_clock::now();
@@ -144,12 +172,16 @@ int main(int argc, char* argv[]) {
     std::cout << "Processed " << lines.size() << " lines in " << duration << "s" << std::endl;
     std::cout << "Speed: " << (lines.size() / duration) << " lines/sec" << std::endl;
 
-    // 5. Output
+    // 5. Output with buffered I/O
     if (!args.output_path.empty()) {
         std::ofstream outfile(args.output_path);
+        // Use larger buffer for better I/O performance
+        char buffer[65536];
+        outfile.rdbuf()->pubsetbuf(buffer, sizeof(buffer));
         for (const auto& res : results) {
             outfile << res << "\n";
         }
+        std::cout << "Done. Saved to " << args.output_path << std::endl;
     }
 
     return 0;

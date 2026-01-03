@@ -3,115 +3,190 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <array>
 
 namespace khmer {
 
-// Khmer Unicode Ranges
-constexpr char32_t KHMER_START = 0x1780;
-constexpr char32_t KHMER_END = 0x17FF;
-constexpr char32_t KHMER_SYMBOLS_START = 0x19E0;
-constexpr char32_t KHMER_SYMBOLS_END = 0x19FF;
+// ============================================================================
+// High-performance character classification using lookup tables with bit flags
+// Inspired by 1 Billion Row Challenge optimizations
+// ============================================================================
 
-inline bool is_khmer_char(char32_t c) {
-    return (c >= 0x1780 && c <= 0x17FF) || (c >= 0x19E0 && c <= 0x19FF);
+// Bit flags for character types
+constexpr uint8_t FLAG_DIGIT = 1;
+constexpr uint8_t FLAG_CONSONANT = 2;
+constexpr uint8_t FLAG_DEP_VOWEL = 4;
+constexpr uint8_t FLAG_SIGN = 8;
+constexpr uint8_t FLAG_SEPARATOR = 16;
+constexpr uint8_t FLAG_VALID_SINGLE = 32;
+constexpr uint8_t FLAG_KHMER = 64;
+constexpr uint8_t FLAG_CURRENCY = 128;
+
+// Table covers 0x0000 to 0x17FF (Khmer range + ASCII)
+constexpr size_t TABLE_SIZE = 0x1800;
+
+// Initialize lookup table at compile time using constexpr
+constexpr std::array<uint8_t, TABLE_SIZE> init_char_flags() {
+    std::array<uint8_t, TABLE_SIZE> flags{};
+
+    // ASCII Digits (0-9)
+    for (int c = '0'; c <= '9'; ++c)
+        flags[c] |= FLAG_DIGIT;
+
+    // Khmer Digits (0x17E0-0x17E9)
+    for (int c = 0x17E0; c <= 0x17E9; ++c)
+        flags[c] |= FLAG_DIGIT;
+
+    // Khmer Consonants (0x1780-0x17A2)
+    for (int c = 0x1780; c <= 0x17A2; ++c)
+        flags[c] |= FLAG_CONSONANT;
+
+    // Dependent Vowels (0x17B6-0x17C5)
+    for (int c = 0x17B6; c <= 0x17C5; ++c)
+        flags[c] |= FLAG_DEP_VOWEL;
+
+    // Signs (0x17C6-0x17D1, 0x17D3, 0x17DD)
+    for (int c = 0x17C6; c <= 0x17D1; ++c)
+        flags[c] |= FLAG_SIGN;
+    flags[0x17D3] |= FLAG_SIGN;
+    flags[0x17DD] |= FLAG_SIGN;
+
+    // Khmer range (0x1780-0x17FF)
+    for (int c = 0x1780; c <= 0x17FF; ++c)
+        flags[c] |= FLAG_KHMER;
+
+    // Currency symbols
+    flags['$'] |= FLAG_CURRENCY;
+    flags[0x17DB] |= FLAG_CURRENCY; // Khmer Riel
+
+    // Separators - ASCII
+    flags[' '] |= FLAG_SEPARATOR;
+    flags['\t'] |= FLAG_SEPARATOR;
+    flags['\n'] |= FLAG_SEPARATOR;
+    flags['\r'] |= FLAG_SEPARATOR;
+    flags['?'] |= FLAG_SEPARATOR;
+    flags['!'] |= FLAG_SEPARATOR;
+    flags['.'] |= FLAG_SEPARATOR;
+    flags[','] |= FLAG_SEPARATOR;
+    flags[':'] |= FLAG_SEPARATOR;
+    flags[';'] |= FLAG_SEPARATOR;
+    flags['"'] |= FLAG_SEPARATOR;
+    flags['\''] |= FLAG_SEPARATOR;
+    flags['('] |= FLAG_SEPARATOR;
+    flags[')'] |= FLAG_SEPARATOR;
+    flags['['] |= FLAG_SEPARATOR;
+    flags[']'] |= FLAG_SEPARATOR;
+    flags['{'] |= FLAG_SEPARATOR;
+    flags['}'] |= FLAG_SEPARATOR;
+    flags['-'] |= FLAG_SEPARATOR;
+    flags['/'] |= FLAG_SEPARATOR;
+    flags['$'] |= FLAG_SEPARATOR;
+    flags['%'] |= FLAG_SEPARATOR;
+    flags[0x00AB] |= FLAG_SEPARATOR; // «
+    flags[0x00BB] |= FLAG_SEPARATOR; // »
+    flags[0x02DD] |= FLAG_SEPARATOR; // ˝
+
+    // Khmer punctuation range (0x17D4-0x17DB)
+    for (int c = 0x17D4; c <= 0x17DB; ++c)
+        flags[c] |= FLAG_SEPARATOR;
+
+    // Valid single words - Consonants
+    flags[0x1780] |= FLAG_VALID_SINGLE; // ក
+    flags[0x1781] |= FLAG_VALID_SINGLE; // ខ
+    flags[0x1782] |= FLAG_VALID_SINGLE; // គ
+    flags[0x1784] |= FLAG_VALID_SINGLE; // ង
+    flags[0x1785] |= FLAG_VALID_SINGLE; // ច
+    flags[0x1786] |= FLAG_VALID_SINGLE; // ឆ
+    flags[0x1789] |= FLAG_VALID_SINGLE; // ញ
+    flags[0x178A] |= FLAG_VALID_SINGLE; // ដ
+    flags[0x178F] |= FLAG_VALID_SINGLE; // ត
+    flags[0x1791] |= FLAG_VALID_SINGLE; // ទ
+    flags[0x1796] |= FLAG_VALID_SINGLE; // ព
+    flags[0x179A] |= FLAG_VALID_SINGLE; // រ
+    flags[0x179B] |= FLAG_VALID_SINGLE; // ល
+    flags[0x179F] |= FLAG_VALID_SINGLE; // ស
+    flags[0x17A1] |= FLAG_VALID_SINGLE; // ឡ
+
+    // Valid single words - Independent Vowels
+    flags[0x17A6] |= FLAG_VALID_SINGLE; // ឦ
+    flags[0x17A7] |= FLAG_VALID_SINGLE; // ឧ
+    flags[0x17AA] |= FLAG_VALID_SINGLE; // ឪ
+    flags[0x17AC] |= FLAG_VALID_SINGLE; // ឬ
+    flags[0x17AE] |= FLAG_VALID_SINGLE; // ឮ
+    flags[0x17AF] |= FLAG_VALID_SINGLE; // ឯ
+    flags[0x17B1] |= FLAG_VALID_SINGLE; // ឱ
+    flags[0x17B3] |= FLAG_VALID_SINGLE; // ឳ
+
+    return flags;
 }
 
-inline bool is_consonant(char32_t c) {
-    return c >= 0x1780 && c <= 0x17A2;
+// Compile-time initialized lookup table
+inline constexpr std::array<uint8_t, TABLE_SIZE> CHAR_FLAGS = init_char_flags();
+
+// ============================================================================
+// Inline lookup functions using the table
+// ============================================================================
+
+// Cross-platform force inline macro
+#if defined(_MSC_VER)
+    #define FORCE_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+    #define FORCE_INLINE __attribute__((always_inline)) inline
+#else
+    #define FORCE_INLINE inline
+#endif
+
+FORCE_INLINE bool is_digit(char32_t c) {
+    return c < TABLE_SIZE && (CHAR_FLAGS[c] & FLAG_DIGIT) != 0;
 }
 
-inline bool is_independent_vowel(char32_t c) {
-    return c >= 0x17A3 && c <= 0x17B3;
+FORCE_INLINE bool is_consonant(char32_t c) {
+    return c < TABLE_SIZE && (CHAR_FLAGS[c] & FLAG_CONSONANT) != 0;
 }
 
-inline bool is_dependent_vowel(char32_t c) {
-    return c >= 0x17B6 && c <= 0x17C5;
+FORCE_INLINE bool is_dependent_vowel(char32_t c) {
+    return c < TABLE_SIZE && (CHAR_FLAGS[c] & FLAG_DEP_VOWEL) != 0;
 }
 
-inline bool is_sign(char32_t c) {
-    return (c >= 0x17C6 && c <= 0x17D1) || c == 0x17D3 || c == 0x17DD;
+FORCE_INLINE bool is_sign(char32_t c) {
+    return c < TABLE_SIZE && (CHAR_FLAGS[c] & FLAG_SIGN) != 0;
 }
 
-inline bool is_coeng(char32_t c) {
+FORCE_INLINE bool is_coeng(char32_t c) {
     return c == 0x17D2;
 }
 
-inline bool is_digit(char32_t c) {
-    // ASCII 0-9 or Khmer 0-9
-    return (c >= 0x30 && c <= 0x39) || (c >= 0x17E0 && c <= 0x17E9);
+FORCE_INLINE bool is_khmer_char(char32_t c) {
+    // Include extended Khmer range (0x19E0-0x19FF) with direct check
+    return (c < TABLE_SIZE && (CHAR_FLAGS[c] & FLAG_KHMER) != 0)
+           || (c >= 0x19E0 && c <= 0x19FF);
 }
 
-inline bool is_currency_symbol(char32_t c) {
-    // $, ុ (17DB), €, £, ¥
-    return c == '$' || c == 0x17DB || c == 0x20AC || c == 0x00A3 || c == 0x00A5;
+FORCE_INLINE bool is_currency_symbol(char32_t c) {
+    return c < TABLE_SIZE && (CHAR_FLAGS[c] & FLAG_CURRENCY) != 0;
 }
 
-inline bool is_separator(char32_t c) {
-    // Khmer Punctuation 0x17D4 - 0x17DA
-    if (c >= 0x17D4 && c <= 0x17DA) {
-        return true;
-    }
-    // Currency Reil (U+17DB) considered separator in original logic?
-    // Rust port says: "if c == '\u{17DB}' { return true; }" matching Python line 339
-    if (c == 0x17DB) {
-        return true;
-    }
-
-    // Common punctuation
-    // ! ? . , ; : " ' ( ) [ ] { } - / « » “ ” ˝ $ % space
-    switch (c) {
-        case '!': case '?': case '.': case ',': case ';': case ':':
-        case '"': case '\'': case '(': case ')': case '[': case ']':
-        case '{': case '}': case '-': case '/':
-        case 0x00AB: // «
-        case 0x00BB: // »
-        case 0x201C: // “
-        case 0x201D: // ”
-        case 0x02DD: // ˝
-        case '$': case '%': case ' ':
-            return true;
-        default:
-            return false;
-    }
+FORCE_INLINE bool is_separator(char32_t c) {
+    if (c < TABLE_SIZE)
+        return (CHAR_FLAGS[c] & FLAG_SEPARATOR) != 0;
+    // Unicode curly quotes (outside table range)
+    return c == 0x201C || c == 0x201D;
 }
 
-inline bool is_valid_single_word(char32_t c) {
-    // Consonants whitelist
-    // 'ក' (1780) | 'ខ' (1781) ...
-    // Hardcoding specific checks to match Rust/Python exactly
-    switch (c) {
-        case 0x1780: // ក
-        case 0x1781: // ខ
-        case 0x1782: // គ
-        case 0x1784: // ង
-        case 0x1785: // ច
-        case 0x1786: // ឆ
-        case 0x1789: // ញ
-        case 0x178A: // ដ
-        case 0x178F: // ត
-        case 0x1791: // ទ
-        case 0x1796: // ព
-        case 0x179A: // រ
-        case 0x179B: // ល
-        case 0x179F: // ស
-        case 0x17A1: // ឡ
-        // Independent Vowels - MUST match Python exactly
-        case 0x17AC: // ឬ
-        case 0x17AE: // ឮ
-        case 0x17AA: // ឪ
-        case 0x17AF: // ឯ
-        case 0x17B1: // ឱ
-        case 0x17A6: // ឦ
-        case 0x17A7: // ឧ
-        case 0x17B3: // ឳ
-            return true;
-        default:
-            return false;
-    }
+FORCE_INLINE bool is_valid_single_word(char32_t c) {
+    return c < TABLE_SIZE && (CHAR_FLAGS[c] & FLAG_VALID_SINGLE) != 0;
 }
+
+FORCE_INLINE bool is_independent_vowel(char32_t c) {
+    return c >= 0x17A3 && c <= 0x17B3;
+}
+
+// ============================================================================
+// UTF-8 Helper Functions
+// ============================================================================
 
 // UTF-8 Helper: Get code point and length from string at index
-inline std::pair<char32_t, int> get_char_at(std::string_view text, size_t index) {
+FORCE_INLINE std::pair<char32_t, int> get_char_at(std::string_view text, size_t index) {
     if (index >= text.length()) return {0, 0};
 
     unsigned char c = static_cast<unsigned char>(text[index]);

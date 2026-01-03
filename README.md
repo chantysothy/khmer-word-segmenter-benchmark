@@ -17,28 +17,28 @@ Tested on the same hardware with 10,000 lines of Khmer text:
 
 | Language | Speed (lines/sec) | Speedup vs Python | Key Optimizations |
 |----------|-------------------|-------------------|-------------------|
-| **Go** | **153,024** | **241x** | Trie + 32 goroutines + sync.Pool |
-| **C# (.NET)** | 86,232 | 136x | Trie + lookup tables + fast JSON + Parallel.For |
-| **Rust** | 73,714 | 116x | Trie + FxHashMap + Rayon parallelism |
-| **Java** | 22,075 | 35x | Trie + parallel streams + flat arrays |
-| **C++** | 21,654 | 34x | Trie + Robin Hood HashMap + OpenMP |
-| **Node.js** | 9,941 | 16x | Trie + worker threads + charCode optimization |
-| **Bun** | 9,307 | 15x | Trie + Web Workers + TypedArray buffers |
-| **WASM** | 8,280 | 13x | AssemblyScript + worker threads + lookup tables |
-| **Python** | 635 | 1x | Original reference implementation |
+| **Go** | **157,962** | **254x** | Trie + 32 goroutines + sync.Pool |
+| **C# (.NET)** | 81,365 | 131x | Trie + lookup tables + fast JSON + Parallel.For |
+| **Rust** | 79,873 | 129x | Trie + FxHashMap + Rayon parallelism |
+| **C++** | 24,074 | 39x | Trie + lookup tables + fast JSON + OpenMP |
+| **Java** | 21,552 | 35x | Trie + parallel streams + flat arrays |
+| **Node.js** | 9,770 | 16x | Trie + worker threads + charCode optimization |
+| **Bun** | 9,366 | 15x | Trie + Web Workers + TypedArray buffers |
+| **WASM** | 8,390 | 14x | AssemblyScript + worker threads + lookup tables |
+| **Python** | 621 | 1x | Original reference implementation |
 
 ### Performance Visualization
 
 ```
-Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 153,024
-C#       ████████████████████████████████████████████████████████████████████████████████████ 86,232
-Rust     █████████████████████████████████████████████████████████████████████ 73,714
-Java     █████████████████████ 22,075
-C++      █████████████████████ 21,654
-Node.js  ██████████ 9,941
-Bun      █████████ 9,307
-WASM     ████████ 8,280
-Python   █ 635
+Go       ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 157,962
+C#       ████████████████████████████████████████████████████████████████████████████████████ 81,365
+Rust     ████████████████████████████████████████████████████████████████████████████████ 79,873
+C++      ██████████████████████████ 24,074
+Java     ████████████████████████ 21,552
+Node.js  ████████████ 9,770
+Bun      ███████████ 9,366
+WASM     ██████████ 8,390
+Python   █ 621
          └──────────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
 ```
 
