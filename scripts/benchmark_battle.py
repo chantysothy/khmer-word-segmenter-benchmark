@@ -15,6 +15,7 @@ NODE_DIR = os.path.join(BASE_DIR, 'khmer-node')
 JAVA_DIR = os.path.join(BASE_DIR, 'khmer-java')
 GO_DIR = os.path.join(BASE_DIR, 'khmer-go')
 CPP_DIR = os.path.join(BASE_DIR, 'khmer-cpp')
+BUN_DIR = os.path.join(BASE_DIR, 'khmer-bun')
 TEMP_INPUT = os.path.join(BASE_DIR, 'temp_battle_input.txt')
 TEMP_OUTPUT_NODE = os.path.join(BASE_DIR, 'temp_node_output.txt')
 TEMP_OUTPUT_CSHARP = os.path.join(BASE_DIR, 'temp_csharp_output.txt')
@@ -23,6 +24,7 @@ TEMP_OUTPUT_RUST = os.path.join(BASE_DIR, 'temp_rust_output.txt')
 TEMP_OUTPUT_JAVA = os.path.join(BASE_DIR, 'temp_java_output.txt')
 TEMP_OUTPUT_GO = os.path.join(BASE_DIR, 'temp_go_output.txt')
 TEMP_OUTPUT_CPP = os.path.join(BASE_DIR, 'temp_cpp_output.txt')
+TEMP_OUTPUT_BUN = os.path.join(BASE_DIR, 'temp_bun_output.txt')
 CSHARP_PROJECT = os.path.join(BASE_DIR, 'khmer-dotnet')
 WASM_DIR = os.path.join(BASE_DIR, 'khmer-wasm')
 RUST_DIR = os.path.join(BASE_DIR, 'khmer-rs')
@@ -403,6 +405,69 @@ def benchmark_cpp():
     print(f"Total System Time (Load+Proc): {total_real_time:.4f}s")
     return speed
 
+def benchmark_bun():
+    print("\n" + "="*30)
+    print("BUN CHALLENGER")
+    print("="*30)
+
+    # Find bun executable
+    bun_exe = None
+    import shutil
+    bun_exe = shutil.which('bun')
+    if not bun_exe:
+        # Try common Windows path
+        home = os.path.expanduser('~')
+        possible_paths = [
+            os.path.join(home, '.bun', 'bin', 'bun.exe'),
+            os.path.join(home, '.bun', 'bin', 'bun'),
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                bun_exe = p
+                break
+
+    if not bun_exe:
+        print("Bun not found! Install from https://bun.sh")
+        return 0
+
+    src_file = os.path.join(BUN_DIR, 'src', 'index.ts')
+    if not os.path.exists(src_file):
+        print(f"Bun source not found at {src_file}!")
+        return 0
+
+    cmd = [
+        bun_exe, "run", src_file,
+        "--dict", os.path.join(DATA_DIR, "khmer_dictionary_words.txt"),
+        "--freq", os.path.join(DATA_DIR, "khmer_word_frequencies.json"),
+        "--input", INPUT_FILE,
+    ]
+    if not NO_OUTPUT:
+        cmd.extend(["--output", TEMP_OUTPUT_BUN])
+
+    start_time = time.time()
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+    total_real_time = time.time() - start_time
+
+    if result.returncode != 0:
+        print("Bun failed:")
+        print(result.stderr)
+        return 0
+
+    print(result.stdout)
+
+    # Parse speed from stdout
+    speed = 0.0
+    for line in result.stdout.split('\n'):
+        if "Speed:" in line:
+            try:
+                parts = line.split()
+                speed = float(parts[1])
+            except:
+                pass
+
+    print(f"Total System Time (Load+Proc): {total_real_time:.4f}s")
+    return speed
+
 def main():
     global INPUT_FILE, NO_OUTPUT
 
@@ -433,6 +498,7 @@ def main():
 
     py_speed = benchmark_python()
     node_speed = benchmark_node()
+    bun_speed = benchmark_bun()
     csharp_speed = benchmark_csharp()
     wasm_speed = benchmark_wasm()
     rust_speed = benchmark_rust()
@@ -447,6 +513,7 @@ def main():
     print("-"*35)
     print(f"{'Python':<15} {py_speed:>20.2f}")
     print(f"{'Node.js':<15} {node_speed:>20.2f}")
+    print(f"{'Bun':<15} {bun_speed:>20.2f}")
     print(f"{'C# (.NET)':<15} {csharp_speed:>20.2f}")
     print(f"{'WASM (AS)':<15} {wasm_speed:>20.2f}")
     print(f"{'Rust':<15} {rust_speed:>20.2f}")
@@ -457,6 +524,7 @@ def main():
     speeds = [
         ("Python", py_speed),
         ("Node.js", node_speed),
+        ("Bun", bun_speed),
         ("C#", csharp_speed),
         ("Wasm", wasm_speed),
         ("Rust", rust_speed),
@@ -483,7 +551,7 @@ def main():
                 print(f"  {name.ljust(10)}: {ratio:.2f}x")
 
     # Cleanup - only temp files, not user-provided input
-    cleanup_files = [TEMP_OUTPUT_NODE, TEMP_OUTPUT_CSHARP,
+    cleanup_files = [TEMP_OUTPUT_NODE, TEMP_OUTPUT_CSHARP, TEMP_OUTPUT_BUN,
                      TEMP_OUTPUT_WASM, TEMP_OUTPUT_RUST, TEMP_OUTPUT_JAVA, TEMP_OUTPUT_GO, TEMP_OUTPUT_CPP]
     # Only remove TEMP_INPUT if it was generated (not a user file)
     if INPUT_FILE == TEMP_INPUT:
