@@ -52,39 +52,53 @@ namespace KhmerSegmenter
 
         public static bool IsSeparator(char c)
         {
-            // Khan (17D4), Bariyoosan (17D5), Camnuc (17D6) - rare, etc.
-            // Also standard punctuation
-            return c == 0x17D4 || c == 0x17D5 || c == 0x17D6 ||
-                   c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+            // Khmer Punctuation range (17D4-17DA) including ។ ៕ ៖ ៗ etc.
+            if (c >= 0x17D4 && c <= 0x17DA)
+                return true;
+            // Khmer Currency Symbol ៛ (17DB)
+            if (c == 0x17DB)
+                return true;
+            // Standard ASCII punctuation and whitespace
+            // Match Python: '!?.,;:"\\'()[]{}-/ «»""˝$%'
+            return c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
                    c == '?' || c == '!' || c == '.' || c == ',' || c == ':' || c == ';' ||
                    c == '"' || c == '\'' || c == '(' || c == ')' || c == '[' || c == ']' ||
-                   c == '{' || c == '}' || c == '-' || c == '+' || c == '=' || c == '/' ||
-                   c == '\\' || c == '|' || c == '@' || c == '#' || c == '%' || c == '^' ||
-                   c == '&' || c == '*' || c == '_' || c == '<' || c == '>' || c == '~' || c == '`';
+                   c == '{' || c == '}' || c == '-' || c == '/' || c == ' ' ||
+                   c == '«' || c == '»' ||    // U+00AB, U+00BB - Angle quotes
+                   c == '\u201C' || c == '\u201D' ||    // U+201C, U+201D - Curly double quotes
+                   c == '˝' ||                // U+02DD - Double acute accent
+                   c == '$' || c == '%';      // Currency and percent
         }
 
         // Valid Single Words (Consonants/Indep Vowels that can stand alone)
-        // Set derived from Python/Node implementation whitelist
+        // Must match Python exactly: viterbi.py line 13-16
         private static readonly HashSet<char> ValidSingleWords = new HashSet<char>
         {
+            // Consonants (specific subset from Python)
+            '\u1780', // ក Ka
+            '\u1781', // ខ Kha
+            '\u1782', // គ Ko
+            '\u1784', // ង Ngo
+            '\u1785', // ច Ca
+            '\u1786', // ឆ Cha
+            '\u1789', // ញ Nyo
+            '\u178A', // ដ Da
+            '\u178F', // ត Ta
+            '\u1791', // ទ Tho
+            '\u1796', // ព Po
+            '\u179A', // រ Ro
+            '\u179B', // ល Lo
+            '\u179F', // ស Sa
+            '\u17A1', // ឡ La
             // Independent Vowels
-            '\u17A3', '\u17A4', '\u17A5', '\u17A6', '\u17A7', '\u17A8', '\u17A9', '\u17AA',
-            '\u17AB', '\u17AC', '\u17AD', '\u17AE', '\u17AF', '\u17B0', '\u17B1', '\u17B2', '\u17B3',
-            // Consonants that are common particles/words
-            '\u1780', // Ka (neck? rare alone, but maybe) - Python list includes essentially all?
-            // Let's mirror the specific subset if the logic implies "Is it a valid word if length=1?"
-            // The Python implementation allows specific ones.
-            // checking dictionary.ts logic: "isValidSingleWord" usually allows specific set.
-            // Let's include the common ones based on heuristic usage.
-            // Ideally this should match khmer-node/src/constants.ts exactly.
-
-            // From Node implementation:
-            // "KHMER_CONSTANTS.VALID_SINGLE_WORDS"
-             '\u17A5', '\u17A6', '\u17A7', '\u17A9', '\u17AA', '\u17AB', '\u17AC', '\u17AD', '\u17AE', '\u17AF', '\u17B0', '\u17B1', '\u17B2', '\u17B3', // Indep vowels
-             '\u1780', '\u1781', '\u1782', '\u1783', '\u1784', '\u1785', '\u1786', '\u1787', '\u1788', '\u1789', // Ka, Kha, Ko, Kho, Ngo, Ca, Cha, Co, Cho, Nyo
-             '\u178A', '\u178B', '\u178C', '\u178D', '\u178E', '\u178F', '\u1790', '\u1791', '\u1792', '\u1793', // Da, Dha, Do, Dho, Na, Ta, Tha, To, Tho, No
-             '\u1794', '\u1795', '\u1796', '\u1797', '\u1798', '\u1799', '\u179A', '\u179B', '\u179C', // Ba, Pha, Po, Pho, Mo, Yo, Ro, Lo, Vo
-             '\u179D', '\u179E', '\u179F', '\u17A0', '\u17A1', '\u17A2' // Sa, Ha, La, Qa
+            '\u17AC', // ឬ
+            '\u17AE', // ឮ
+            '\u17AA', // ឪ
+            '\u17AF', // ឯ
+            '\u17B1', // ឱ
+            '\u17A6', // ឦ
+            '\u17A7', // ឧ
+            '\u17B3'  // ឳ
         };
 
         public static bool IsValidSingleWord(char c)

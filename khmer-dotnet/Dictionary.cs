@@ -39,11 +39,77 @@ namespace KhmerSegmenter
                     // "Compound OR" check
                     if (w.Contains("\u17D4") && w.Length > 1) continue;
 
+                    // Filter single-char words not in valid_single_words (matches Python)
+                    if (w.Length == 1 && !Constants.IsValidSingleWord(w[0])) continue;
+
                     words.Add(w);
                 }
             }
 
-            // 2. Load Frequencies
+            // 2. Generate Variants first (before filtering - matches Python order)
+            var allWords = new HashSet<string>(words);
+
+            // First pass: Ta/Da swap + Coeng Ro ordering for original words
+            foreach (var word in words)
+            {
+                GenerateVariants(word, allWords);
+            }
+
+            // Python also processes variants of variants (base_set = {word} | variants)
+            // Do another pass on newly added words
+            var newVariants = new HashSet<string>(allWords);
+            newVariants.ExceptWith(words);
+            foreach (var word in newVariants)
+            {
+                GenerateVariants(word, allWords);
+            }
+
+            // 3. Apply "ឬ" (OR) filter - remove compound words containing ឬ if parts are valid
+            // This matches Python's viterbi.py lines 49-70
+            var wordsToRemove = new HashSet<string>();
+            const char OR_CHAR = '\u17AC'; // ឬ
+
+            foreach (var word in allWords)
+            {
+                if (word.Contains(OR_CHAR) && word.Length > 1)
+                {
+                    // Case 1: Starts with ឬ (e.g. ឬហៅ)
+                    if (word[0] == OR_CHAR)
+                    {
+                        var suffix = word.Substring(1);
+                        if (allWords.Contains(suffix))
+                        {
+                            wordsToRemove.Add(word);
+                        }
+                    }
+                    // Case 2: Ends with ឬ (e.g. មកឬ)
+                    else if (word[word.Length - 1] == OR_CHAR)
+                    {
+                        var prefix = word.Substring(0, word.Length - 1);
+                        if (allWords.Contains(prefix))
+                        {
+                            wordsToRemove.Add(word);
+                        }
+                    }
+                    // Case 3: ឬ in the middle (e.g. មែនឬទេ)
+                    else
+                    {
+                        var parts = word.Split(OR_CHAR);
+                        if (parts.All(p => allWords.Contains(p) || p == ""))
+                        {
+                            wordsToRemove.Add(word);
+                        }
+                    }
+                }
+            }
+
+            // Remove filtered words
+            foreach (var w in wordsToRemove)
+            {
+                allWords.Remove(w);
+            }
+
+            // 4. Load Frequencies
             var freqs = new Dictionary<string, double>();
             if (File.Exists(freqPath))
             {
@@ -58,26 +124,21 @@ namespace KhmerSegmenter
                 }
             }
 
-            // 3. Calculate Costs
+            // 5. Calculate Costs - MUST match Python: only sum from frequency file entries
+            // Python iterates over data.items() (frequency file), NOT dictionary words
             double totalCount = 0;
-            foreach (var w in words)
+            foreach (var kvp in freqs)
             {
-                if (freqs.TryGetValue(w, out double f))
-                {
-                    totalCount += f;
-                }
-                else
-                {
-                    totalCount += DEFAULT_FREQ;
-                }
+                totalCount += Math.Max(kvp.Value, DEFAULT_FREQ);
             }
 
             if (totalCount <= 0) totalCount = 1;
 
-            // Build trie and word set
-            foreach (var w in words)
+            // Build trie and word set from filtered allWords
+            foreach (var w in allWords)
             {
-                double count = freqs.ContainsKey(w) ? freqs[w] : DEFAULT_FREQ;
+                // Apply min_freq_floor (matches Python: eff = max(count, min_freq_floor))
+                double count = freqs.ContainsKey(w) ? Math.Max(freqs[w], DEFAULT_FREQ) : DEFAULT_FREQ;
                 float cost = (float)-Math.Log10(count / totalCount);
 
                 _trie.Insert(w, cost);
@@ -87,43 +148,6 @@ namespace KhmerSegmenter
 
             // Calculate Unknown Cost
             UnknownCost = (float)-Math.Log10(1.0 / totalCount) + 5.0f;
-
-            // 4. Generate Variants
-            var variants = new List<(string word, float cost)>();
-
-            foreach (var word in words)
-            {
-                float wordCost = 0;
-                _trie.TryLookup(word.AsSpan(), out wordCost);
-
-                // Swap Ta/Da subscripts
-                if (word.Contains("\u17D2\u178F"))
-                {
-                    var v = word.Replace("\u17D2\u178F", "\u17D2\u178D");
-                    if (!_wordSet.Contains(v))
-                    {
-                        variants.Add((v, wordCost));
-                    }
-                }
-                else if (word.Contains("\u17D2\u178D"))
-                {
-                    var v = word.Replace("\u17D2\u178D", "\u17D2\u178F");
-                    if (!_wordSet.Contains(v))
-                    {
-                        variants.Add((v, wordCost));
-                    }
-                }
-            }
-
-            foreach (var (v, cost) in variants)
-            {
-                if (!_wordSet.Contains(v))
-                {
-                    _trie.Insert(v, cost);
-                    _wordSet.Add(v);
-                    MaxWordLength = Math.Max(MaxWordLength, v.Length);
-                }
-            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -168,6 +192,68 @@ namespace KhmerSegmenter
                 return cost;
             }
             return UnknownCost;
+        }
+
+        /// <summary>
+        /// Generate variants for a word (Ta/Da swap and Coeng Ro ordering).
+        /// Matches Python's _generate_variants method in viterbi.py.
+        /// </summary>
+        private static void GenerateVariants(string word, HashSet<string> allWords)
+        {
+            const string COENG_TA = "\u17D2\u178F";
+            const string COENG_DA = "\u17D2\u178D";
+            const string COENG_RO = "\u17D2\u179A";
+            const char COENG = '\u17D2';
+            const char RO = '\u179A';
+
+            // 1. Ta/Da swap
+            if (word.Contains(COENG_TA))
+            {
+                var v = word.Replace(COENG_TA, COENG_DA);
+                allWords.Add(v);
+            }
+            if (word.Contains(COENG_DA))
+            {
+                var v = word.Replace(COENG_DA, COENG_TA);
+                allWords.Add(v);
+            }
+
+            // 2. Coeng Ro ordering swap
+            // Pattern 1: Coeng Ro + Other Coeng -> Other Coeng + Coeng Ro
+            // Pattern 2: Other Coeng + Coeng Ro -> Coeng Ro + Other Coeng
+            // Using simple string scanning instead of regex for performance
+
+            for (int i = 0; i < word.Length - 3; i++)
+            {
+                if (word[i] == COENG)
+                {
+                    // Check for pattern: Coeng X Coeng Y where one of X/Y is Ro
+                    if (i + 3 < word.Length && word[i + 2] == COENG)
+                    {
+                        char first = word[i + 1];
+                        char second = word[i + 3];
+
+                        // Pattern 1: Coeng Ro + Coeng Other -> Coeng Other + Coeng Ro
+                        if (first == RO && second != RO)
+                        {
+                            // Swap: \u17D2\u179A\u17D2X -> \u17D2X\u17D2\u179A
+                            var chars = word.ToCharArray();
+                            chars[i + 1] = second;
+                            chars[i + 3] = RO;
+                            allWords.Add(new string(chars));
+                        }
+                        // Pattern 2: Coeng Other + Coeng Ro -> Coeng Ro + Coeng Other
+                        else if (first != RO && second == RO)
+                        {
+                            // Swap: \u17D2X\u17D2\u179A -> \u17D2\u179A\u17D2X
+                            var chars = word.ToCharArray();
+                            chars[i + 1] = RO;
+                            chars[i + 3] = first;
+                            allWords.Add(new string(chars));
+                        }
+                    }
+                }
+            }
         }
     }
 }
