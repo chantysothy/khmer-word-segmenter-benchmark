@@ -17,26 +17,26 @@ Tested on the same hardware with 10,000 lines of real Khmer text:
 
 | Language | Speed (lines/sec) | Speedup vs Python | Key Optimizations |
 |----------|-------------------|-------------------|-------------------|
-| **Go** | **122,667** | **197x** | Trie + 32 goroutines + sync.Pool |
-| **Rust** | 62,131 | 100x | Trie + FxHashMap + Rayon parallelism |
-| **C# (.NET)** | 60,857 | 98x | Trie + Parallel.For + Span<T> |
-| **C++** | 21,113 | 34x | Trie + Robin Hood HashMap + OpenMP |
-| **Java** | 10,616 | 17x | Trie + parallel streams + flat arrays |
-| **Node.js** | 3,720 | 6x | Trie + worker threads |
-| **WASM** | 892 | 1.4x | AssemblyScript compilation |
-| **Python** | 621 | 1x | Original reference implementation |
+| **Go** | **155,911** | **255x** | Trie + 32 goroutines + sync.Pool |
+| **Rust** | 82,811 | 135x | Trie + FxHashMap + Rayon parallelism |
+| **C# (.NET)** | 57,080 | 93x | Trie + Parallel.For + Span<T> |
+| **C++** | 22,236 | 36x | Trie + Robin Hood HashMap + OpenMP |
+| **Java** | 21,834 | 36x | Trie + parallel streams + flat arrays |
+| **Node.js** | 9,087 | 15x | Trie + worker threads + charCode optimization |
+| **WASM** | 3,000 | 5x | AssemblyScript + Trie with flat array |
+| **Python** | 612 | 1x | Original reference implementation |
 
 ### Performance Visualization
 
 ```
-Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 122,667
-Rust     █████████████████████████████████████████████████████████████ 62,131
-C#       ████████████████████████████████████████████████████████████ 60,857
-C++      ████████████████████████ 21,113
-Java     ███████████ 10,616
-Node.js  ████ 3,720
-WASM     █ 892
-Python   █ 621
+Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 155,911
+Rust     ██████████████████████████████████████████████████████████████████████████████████ 82,811
+C#       ████████████████████████████████████████████████████████ 57,080
+C++      █████████████████████ 22,236
+Java     █████████████████████ 21,834
+Node.js  █████████ 9,087
+WASM     ███ 3,000
+Python   █ 612
          └──────────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
 ```
 
