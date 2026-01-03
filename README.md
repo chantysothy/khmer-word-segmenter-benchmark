@@ -1,6 +1,6 @@
 # Khmer Word Segmenter - Multi-Language Optimization Benchmark
 
-A comprehensive benchmark project comparing optimized implementations of a Khmer word segmentation algorithm across **8 programming languages**. This project demonstrates how the same Viterbi-based algorithm can be optimized and ported to achieve dramatic performance improvements.
+A comprehensive benchmark project comparing optimized implementations of a Khmer word segmentation algorithm across **9 programming languages**. This project demonstrates how the same Viterbi-based algorithm can be optimized and ported to achieve dramatic performance improvements.
 
 ## Project Goal
 
@@ -13,30 +13,32 @@ This project takes the original Python implementation of a probabilistic Khmer w
 
 ## Benchmark Results
 
-Tested on the same hardware with 3,329 lines of real Khmer text (Khmer Folktales corpus):
+Tested on the same hardware with 10,000 lines of Khmer text:
 
 | Language | Speed (lines/sec) | Speedup vs Python | Key Optimizations |
 |----------|-------------------|-------------------|-------------------|
-| **Go** | **162,179** | **347x** | Trie + 32 goroutines + sync.Pool |
-| **Rust** | 91,104 | 195x | Trie + FxHashMap + Rayon parallelism |
-| **C# (.NET)** | 14,891 | 32x | Trie + Parallel.For + Span<T> |
-| **C++** | 13,362 | 29x | Trie + Robin Hood HashMap + OpenMP |
-| **Java** | 3,935 | 8x | Trie + parallel streams + flat arrays |
-| **Node.js** | 3,410 | 7x | Trie + worker threads + charCode optimization |
-| **WASM** | 2,705 | 6x | AssemblyScript + Trie with flat array |
-| **Python** | 468 | 1x | Original reference implementation |
+| **Go** | **246,211** | **392x** | Trie + 32 goroutines + sync.Pool |
+| **Rust** | 128,146 | 204x | Trie + FxHashMap + Rayon parallelism |
+| **Java** | 24,213 | 39x | Trie + parallel streams + flat arrays |
+| **C# (.NET)** | 23,608 | 38x | Trie + Parallel.For + Span<T> |
+| **C++** | 23,446 | 37x | Trie + Robin Hood HashMap + OpenMP |
+| **Node.js** | 10,017 | 16x | Trie + worker threads + charCode optimization |
+| **Bun** | 9,242 | 15x | Trie + Web Workers + TypedArray buffers |
+| **WASM** | 2,894 | 5x | AssemblyScript + Trie with flat array |
+| **Python** | 628 | 1x | Original reference implementation |
 
 ### Performance Visualization
 
 ```
-Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 162,179
-Rust     ███████████████████████████████████████████████████████████████████████████ 91,104
-C#       ████████████ 14,891
-C++      ███████████ 13,362
-Java     ███ 3,935
-Node.js  ███ 3,410
-WASM     ██ 2,705
-Python   █ 468
+Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 246,211
+Rust     ████████████████████████████████████████████████████████████████████████████ 128,146
+Java     ███████████████ 24,213
+C#       ██████████████ 23,608
+C++      ██████████████ 23,446
+Node.js  ██████ 10,017
+Bun      ██████ 9,242
+WASM     ██ 2,894
+Python   █ 628
          └──────────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
 ```
 
@@ -47,13 +49,14 @@ Python   █ 468
 ```
 khmer_segmenter/
 ├── khmer_segmenter/      # Python - Reference implementation
-├── khmer-rs/             # Rust - Fastest implementation
-├── khmer-cpp/            # C++ - High performance with OpenMP
+├── khmer-go/             # Go - Fastest implementation
+├── khmer-rs/             # Rust - High performance
+├── khmer-java/           # Java - JVM with parallel streams
 ├── khmer-dotnet/         # C# (.NET 10) - Cross-platform managed code
+├── khmer-cpp/            # C++ - High performance with OpenMP
 ├── khmer-node/           # Node.js - JavaScript/TypeScript
+├── khmer-bun/            # Bun - Fast JavaScript runtime
 ├── khmer-wasm/           # WebAssembly - Browser-ready
-├── khmer-java/           # Java - JVM implementation (implied)
-├── khmer-go/             # Go - Concurrent implementation (implied)
 ├── data/                 # Shared dictionary and frequency data
 └── scripts/              # Benchmarking and testing tools
 ```
@@ -122,10 +125,13 @@ struct TrieNode {
 - **Others**: Language-native optimized maps
 
 ### 5. Parallel Processing
+- **Go**: Goroutines with worker pools (32 workers)
 - **Rust**: Rayon work-stealing parallelism
-- **C++**: OpenMP with dynamic scheduling
+- **Java**: Parallel streams with thread pools
 - **C#**: Parallel.For
-- **Go**: Goroutines with worker pools
+- **C++**: OpenMP with dynamic scheduling
+- **Node.js**: Worker threads (8 workers)
+- **Bun**: Web Workers with TypedArray buffers (8 workers)
 
 ## Quick Start
 
@@ -161,8 +167,15 @@ dotnet run -c Release -- --input ../data/input.txt --output output.json
 ### Node.js
 ```bash
 cd khmer-node
-npm install
-node main.js --input ../data/input.txt --output output.json
+npm install && npm run build
+node dist/index.js --input ../data/input.txt --output output.json
+```
+
+### Bun
+```bash
+cd khmer-bun
+bun install
+bun run src/index.ts --dict ../data/khmer_dictionary_words.txt --freq ../data/khmer_word_frequencies.json --input ../data/input.txt --output output.json
 ```
 
 ## Running Benchmarks
