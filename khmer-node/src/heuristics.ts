@@ -1,5 +1,13 @@
 import { Dictionary } from './dictionary';
-import { isDigit, isSeparator, isValidSingleWord, isConsonant } from './constants';
+import { isDigitCode, isSeparatorCode, isValidSingleWordCode, isConsonantCode } from './constants';
+
+// Pre-compute special character codes
+const BANTOC = 0x17CB;
+const KAKABAT = 0x17CE;
+const AHSDJA = 0x17CF;
+const I_VOWEL = 0x17B7;
+const TOE = 0x17CD;
+const SAMYOK_SANNYA = 0x17D0;
 
 export function applyHeuristics(segments: string[], dictionary: Dictionary): string[] {
     const merged: string[] = [];
@@ -17,45 +25,47 @@ export function applyHeuristics(segments: string[], dictionary: Dictionary): str
             continue;
         }
 
+        const currLen = curr.length;
+
         // Rule 1: Consonant + [់/ិ៍/៍/៌] -> Merge with PREVIOUS
         // 17CB (Bantoc), 17CE (Kakabat), 17CF (Ahsdja)
         // 17B7 + 17CD (I + Toe)
         if (merged.length > 0) {
-            const chars = [...curr];
-            if (chars.length === 2) {
-                const c0 = chars[0];
-                const c1 = chars[1];
-                if (isConsonant(c0) && (c1 === '\u17CB' || c1 === '\u17CE' || c1 === '\u17CF')) {
+            if (currLen === 2) {
+                const c0 = curr.charCodeAt(0);
+                const c1 = curr.charCodeAt(1);
+                if (isConsonantCode(c0) && (c1 === BANTOC || c1 === KAKABAT || c1 === AHSDJA)) {
                     const prev = merged.pop()!;
                     merged.push(prev + curr);
                     i++;
                     continue;
                 }
             }
-            if (chars.length === 3) {
-                 const c0 = chars[0];
-                 if (isConsonant(c0) && chars[1] === '\u17B7' && chars[2] === '\u17CD') {
+            if (currLen === 3) {
+                const c0 = curr.charCodeAt(0);
+                const c1 = curr.charCodeAt(1);
+                const c2 = curr.charCodeAt(2);
+                if (isConsonantCode(c0) && c1 === I_VOWEL && c2 === TOE) {
                     const prev = merged.pop()!;
                     merged.push(prev + curr);
                     i++;
                     continue;
-                 }
+                }
             }
         }
 
         // Rule 2: Consonant + ័ (\u17D0) -> Merge with NEXT
         if (i + 1 < n) {
-             const chars = [...curr];
-             if (chars.length === 2) {
-                 const c0 = chars[0];
-                 const c1 = chars[1];
-                 if (isConsonant(c0) && c1 === '\u17D0') {
-                     const nextSeg = segments[i+1];
-                     merged.push(curr + nextSeg);
-                     i += 2;
-                     continue;
-                 }
-             }
+            if (currLen === 2) {
+                const c0 = curr.charCodeAt(0);
+                const c1 = curr.charCodeAt(1);
+                if (isConsonantCode(c0) && c1 === SAMYOK_SANNYA) {
+                    const nextSeg = segments[i+1];
+                    merged.push(curr + nextSeg);
+                    i += 2;
+                    continue;
+                }
+            }
         }
 
         merged.push(curr);
@@ -71,21 +81,20 @@ export function postProcessUnknowns(segments: string[], dictionary: Dictionary):
 
     for (const seg of segments) {
         let isKnown = false;
+        const firstCode = seg.charCodeAt(0);
+        const segLen = seg.length;
 
-        if (isDigit(seg.charAt(0))) {
+        if (isDigitCode(firstCode)) {
             isKnown = true;
         } else if (dictionary.contains(seg)) {
             isKnown = true;
-        } else {
-             const chars = [...seg];
-             if (chars.length === 1 && isValidSingleWord(chars[0])) {
-                 isKnown = true;
-             } else if (chars.length === 1 && isSeparator(chars[0])) {
-                 isKnown = true;
-             } else if (seg.includes('.') && chars.length >= 2) {
-                 // Rudimentary acronym check
-                 isKnown = true;
-             }
+        } else if (segLen === 1 && isValidSingleWordCode(firstCode)) {
+            isKnown = true;
+        } else if (segLen === 1 && isSeparatorCode(firstCode)) {
+            isKnown = true;
+        } else if (seg.indexOf('.') !== -1 && segLen >= 2) {
+            // Rudimentary acronym check
+            isKnown = true;
         }
 
         if (isKnown) {
