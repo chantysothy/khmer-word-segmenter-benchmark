@@ -57,44 +57,50 @@ namespace KhmerSegmenter
             Console.WriteLine($"Processing {linesToProcess.Count} lines...");
             var segmenter = new KhmerSegmenter(dictionary);
 
-            using (var writer = new StreamWriter(parsedArgs.OutputPath))
+            var swProcess = Stopwatch.StartNew();
+
+            // Pre-allocate array for results to avoid I/O lock and ensure order
+            string[] results = new string[linesToProcess.Count];
+
+            // Parallel processing using available cores
+            System.Threading.Tasks.Parallel.For(0, linesToProcess.Count, i =>
             {
-                var swProcess = Stopwatch.StartNew();
+                var line = linesToProcess[i];
+                // Segmenter is thread-safe (stateless except for read-only dictionary)
+                var segments = segmenter.Segment(line);
 
-                // Pre-allocate array for results to avoid I/O lock and ensure order
-                string[] results = new string[linesToProcess.Count];
-
-                // Parallel processing using available cores
-                System.Threading.Tasks.Parallel.For(0, linesToProcess.Count, i =>
+                var record = new OutputRecord
                 {
-                    var line = linesToProcess[i];
-                    // Segmenter is thread-safe (stateless except for read-only dictionary)
-                    var segments = segmenter.Segment(line);
+                    id = i,
+                    input = line,
+                    segments = segments
+                };
 
-                    var record = new OutputRecord
+                // Serialize in parallel
+                results[i] = JsonSerializer.Serialize(record);
+            });
+
+            // Write results only if output is specified
+            if (!string.IsNullOrEmpty(parsedArgs.OutputPath))
+            {
+                using (var writer = new StreamWriter(parsedArgs.OutputPath))
+                {
+                    foreach (var json in results)
                     {
-                        id = i,
-                        input = line,
-                        segments = segments
-                    };
-
-                    // Serialize in parallel
-                    results[i] = JsonSerializer.Serialize(record);
-                });
-
-                // Write results sequentially
-                foreach (var json in results)
-                {
-                    writer.WriteLine(json);
+                        writer.WriteLine(json);
+                    }
                 }
-
-                swProcess.Stop();
-                var duration = swProcess.Elapsed.TotalSeconds;
-
-                Console.WriteLine($"Done. Saved to {parsedArgs.OutputPath}");
-                Console.WriteLine($"Time taken: {duration:F2}s");
-                Console.WriteLine($"Speed: {(linesToProcess.Count / duration):F2} lines/sec");
             }
+
+            swProcess.Stop();
+            var duration = swProcess.Elapsed.TotalSeconds;
+
+            if (!string.IsNullOrEmpty(parsedArgs.OutputPath))
+            {
+                Console.WriteLine($"Done. Saved to {parsedArgs.OutputPath}");
+            }
+            Console.WriteLine($"Time taken: {duration:F2}s");
+            Console.WriteLine($"Speed: {(linesToProcess.Count / duration):F2} lines/sec");
         }
 
         static Args ParseArgs(string[] args)
@@ -143,10 +149,14 @@ namespace KhmerSegmenter
                 }
             }
 
-            if (string.IsNullOrEmpty(parsed.InputPath) || string.IsNullOrEmpty(parsed.OutputPath))
+            if (string.IsNullOrEmpty(parsed.InputPath))
             {
-                Console.WriteLine("Usage: dotnet run -- --input <file> --output <file> [options]");
-                // Or if running binary directly
+                Console.WriteLine("Usage: dotnet run -- --input <file> [--output <file>] [options]");
+                Console.WriteLine("Options:");
+                Console.WriteLine("  --dict, -d <path>   Path to dictionary file");
+                Console.WriteLine("  --freq, -f <path>   Path to frequency file");
+                Console.WriteLine("  --output, -o <path> Output file (optional, skip to benchmark only)");
+                Console.WriteLine("  --limit, -l <n>     Limit number of lines");
                 Environment.Exit(1);
             }
 

@@ -3,6 +3,7 @@ import os
 import time
 import subprocess
 import json
+import argparse
 
 # Force UTF-8
 sys.stdout.reconfigure(encoding='utf-8')
@@ -25,6 +26,10 @@ TEMP_OUTPUT_CPP = os.path.join(BASE_DIR, 'temp_cpp_output.txt')
 CSHARP_PROJECT = os.path.join(BASE_DIR, 'khmer-dotnet')
 WASM_DIR = os.path.join(BASE_DIR, 'khmer-wasm')
 RUST_DIR = os.path.join(BASE_DIR, 'khmer-rs')
+
+# Global config (set by CLI args)
+INPUT_FILE = TEMP_INPUT
+NO_OUTPUT = False
 
 sys.path.append(BASE_DIR)
 from khmer_segmenter import KhmerSegmenter
@@ -60,7 +65,7 @@ def benchmark_python():
     print(f"Load Time: {load_time:.4f}s")
 
     # 2. Processing Time
-    with open(TEMP_INPUT, 'r', encoding='utf-8') as f:
+    with open(INPUT_FILE, 'r', encoding='utf-8') as f:
         lines = [line.strip() for line in f if line.strip()]
 
     start_proc = time.time()
@@ -89,9 +94,10 @@ def benchmark_node():
 
     cmd = [
         "node", dist_file,
-        "--input", TEMP_INPUT,
-        "--output", TEMP_OUTPUT_NODE
+        "--input", INPUT_FILE,
     ]
+    if not NO_OUTPUT:
+        cmd.extend(["--output", TEMP_OUTPUT_NODE])
 
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
@@ -134,9 +140,10 @@ def benchmark_csharp():
 
     cmd = [
         "dotnet", dll_path,
-        "--input", TEMP_INPUT,
-        "--output", TEMP_OUTPUT_CSHARP
+        "--input", INPUT_FILE,
     ]
+    if not NO_OUTPUT:
+        cmd.extend(["--output", TEMP_OUTPUT_CSHARP])
 
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
@@ -176,9 +183,10 @@ def benchmark_wasm():
         "node", runner_path,
         "--dict", os.path.join(DATA_DIR, "khmer_dictionary_words.txt"),
         "--freq", os.path.join(DATA_DIR, "khmer_word_frequencies.json"),
-        "--input", TEMP_INPUT,
-        "--output", TEMP_OUTPUT_WASM
+        "--input", INPUT_FILE,
     ]
+    if not NO_OUTPUT:
+        cmd.extend(["--output", TEMP_OUTPUT_WASM])
 
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
@@ -221,9 +229,10 @@ def benchmark_rust():
         exe_path,
         "--dict", os.path.join(DATA_DIR, "khmer_dictionary_words.txt"),
         "--freq", os.path.join(DATA_DIR, "khmer_word_frequencies.json"),
-        "--input", TEMP_INPUT,
-        "--output", TEMP_OUTPUT_RUST
+        "--input", INPUT_FILE,
     ]
+    if not NO_OUTPUT:
+        cmd.extend(["--output", TEMP_OUTPUT_RUST])
 
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
@@ -276,9 +285,10 @@ def benchmark_java():
         java_exe, "-cp", classes_dir, "khmer.Main",
         "--dict", os.path.join(DATA_DIR, "khmer_dictionary_words.txt"),
         "--freq", os.path.join(DATA_DIR, "khmer_word_frequencies.json"),
-        "--input", TEMP_INPUT,
-        "--output", TEMP_OUTPUT_JAVA
+        "--input", INPUT_FILE,
     ]
+    if not NO_OUTPUT:
+        cmd.extend(["--output", TEMP_OUTPUT_JAVA])
 
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
@@ -319,9 +329,10 @@ def benchmark_go():
         exe_path,
         "--dict", os.path.join(DATA_DIR, "khmer_dictionary_words.txt"),
         "--freq", os.path.join(DATA_DIR, "khmer_word_frequencies.json"),
-        "--input", TEMP_INPUT,
-        "--output", TEMP_OUTPUT_GO
+        "--input", INPUT_FILE,
     ]
+    if not NO_OUTPUT:
+        cmd.extend(["--output", TEMP_OUTPUT_GO])
 
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
@@ -362,10 +373,11 @@ def benchmark_cpp():
         exe_path,
         "--dict", os.path.join(DATA_DIR, "khmer_dictionary_words.txt"),
         "--freq", os.path.join(DATA_DIR, "khmer_word_frequencies.json"),
-        "--input", TEMP_INPUT,
-        "--output", TEMP_OUTPUT_CPP,
+        "--input", INPUT_FILE,
         "--threads", "1"  # Single-threaded for fair comparison
     ]
+    if not NO_OUTPUT:
+        cmd.extend(["--output", TEMP_OUTPUT_CPP])
 
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
@@ -392,7 +404,32 @@ def benchmark_cpp():
     return speed
 
 def main():
-    generate_workload()
+    global INPUT_FILE, NO_OUTPUT
+
+    parser = argparse.ArgumentParser(description='Benchmark battle for Khmer segmenters')
+    parser.add_argument('--input', '-i', type=str, default=None,
+                        help='Input file path. If not provided, generates synthetic workload.')
+    parser.add_argument('--no-output', action='store_true',
+                        help='Skip writing output files (benchmark processing only)')
+    args = parser.parse_args()
+
+    # Set global config
+    NO_OUTPUT = args.no_output
+
+    if args.input:
+        INPUT_FILE = args.input
+        if not os.path.exists(INPUT_FILE):
+            print(f"Error: Input file not found: {INPUT_FILE}")
+            sys.exit(1)
+        # Count lines and show file info
+        with open(INPUT_FILE, 'r', encoding='utf-8') as f:
+            line_count = sum(1 for line in f if line.strip())
+        file_size_kb = os.path.getsize(INPUT_FILE) / 1024
+        print(f"Using input file: {INPUT_FILE}")
+        print(f"Lines: {line_count}, Size: {file_size_kb:.2f} KB")
+    else:
+        INPUT_FILE = TEMP_INPUT
+        generate_workload()
 
     py_speed = benchmark_python()
     node_speed = benchmark_node()
@@ -445,9 +482,13 @@ def main():
                 ratio = speed / py_speed
                 print(f"  {name.ljust(10)}: {ratio:.2f}x")
 
-    # Cleanup
-    for f in [TEMP_INPUT, TEMP_OUTPUT_NODE, TEMP_OUTPUT_CSHARP,
-              TEMP_OUTPUT_WASM, TEMP_OUTPUT_RUST, TEMP_OUTPUT_JAVA, TEMP_OUTPUT_GO, TEMP_OUTPUT_CPP]:
+    # Cleanup - only temp files, not user-provided input
+    cleanup_files = [TEMP_OUTPUT_NODE, TEMP_OUTPUT_CSHARP,
+                     TEMP_OUTPUT_WASM, TEMP_OUTPUT_RUST, TEMP_OUTPUT_JAVA, TEMP_OUTPUT_GO, TEMP_OUTPUT_CPP]
+    # Only remove TEMP_INPUT if it was generated (not a user file)
+    if INPUT_FILE == TEMP_INPUT:
+        cleanup_files.append(TEMP_INPUT)
+    for f in cleanup_files:
         if os.path.exists(f):
             os.remove(f)
 

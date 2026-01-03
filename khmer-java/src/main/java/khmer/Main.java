@@ -52,11 +52,12 @@ public class Main {
             }
         }
 
-        if (inputPath == null || outputPath == null) {
-            System.err.println("Usage: java khmer.Main --input <file> --output <file> [options]");
+        if (inputPath == null) {
+            System.err.println("Usage: java khmer.Main --input <file> [--output <file>] [options]");
             System.err.println("Options:");
             System.err.println("  --dict, -d <path>   Path to dictionary file");
             System.err.println("  --freq, -f <path>   Path to frequency file");
+            System.err.println("  --output, -o <path> Output file (optional, skip to benchmark only)");
             System.err.println("  --limit, -l <n>     Limit number of lines to process");
             System.err.println("  --threads, -t <n>   Number of threads (0 = auto)");
             System.exit(1);
@@ -139,19 +140,23 @@ public class Main {
             pool.shutdown();
         }
 
-        // Write results sequentially with buffered writer
-        try (BufferedWriter writer = new BufferedWriter(
-                new OutputStreamWriter(new FileOutputStream(outputPath), StandardCharsets.UTF_8), 65536)) {
-            for (String json : results) {
-                writer.write(json);
-                writer.newLine();
+        // Write results sequentially with buffered writer (only if output specified)
+        if (outputPath != null) {
+            try (BufferedWriter writer = new BufferedWriter(
+                    new OutputStreamWriter(new FileOutputStream(outputPath), StandardCharsets.UTF_8), 65536)) {
+                for (String json : results) {
+                    writer.write(json);
+                    writer.newLine();
+                }
             }
         }
 
         long endProcess = System.currentTimeMillis();
         double duration = (endProcess - startProcess) / 1000.0;
 
-        System.out.println("Done. Saved to " + outputPath);
+        if (outputPath != null) {
+            System.out.println("Done. Saved to " + outputPath);
+        }
         System.out.printf("Time taken: %.2fs%n", duration);
         System.out.printf("Speed: %.2f lines/sec%n", numLines / duration);
     }

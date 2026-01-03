@@ -11,7 +11,7 @@ interface Args {
     dict: string;
     freq: string;
     input: string;
-    output: string;
+    output: string | null;
     limit: number | null;
     threads: number;
 }
@@ -22,7 +22,7 @@ function parseArgs(): Args {
         dict: path.join(__dirname, '../../data/khmer_dictionary_words.txt'),
         freq: path.join(__dirname, '../../data/khmer_word_frequencies.json'),
         input: '',
-        output: '',
+        output: null,
         limit: null,
         threads: 0 // 0 = auto (use CPU count)
     };
@@ -44,11 +44,12 @@ function parseArgs(): Args {
         }
     }
 
-    if (!parsed.input || !parsed.output) {
-        console.error("Usage: node dist/index.js --input <file> --output <file> [options]");
+    if (!parsed.input) {
+        console.error("Usage: node dist/index.js --input <file> [--output <file>] [options]");
         console.error("Options:");
         console.error("  --dict, -d <path>   Path to dictionary file");
         console.error("  --freq, -f <path>   Path to frequency file");
+        console.error("  --output, -o <path> Output file (optional, skip to benchmark only)");
         console.error("  --limit, -l <n>     Limit number of lines");
         console.error("  --threads, -t <n>   Number of worker threads (0 = auto)");
         process.exit(1);
@@ -228,17 +229,21 @@ async function main() {
         results = await runSingleThreaded(args, linesToProcess);
     }
 
-    // Write results
-    const outputStream = fs.createWriteStream(args.output);
-    for (const record of results) {
-        outputStream.write(record + '\n');
+    // Write results only if output is specified
+    if (args.output) {
+        const outputStream = fs.createWriteStream(args.output);
+        for (const record of results) {
+            outputStream.write(record + '\n');
+        }
+        outputStream.end();
     }
-    outputStream.end();
 
     const endProcess = performance.now();
     const duration = (endProcess - startProcess) / 1000;
 
-    console.log(`Done. Saved to ${args.output}`);
+    if (args.output) {
+        console.log(`Done. Saved to ${args.output}`);
+    }
     console.log(`Time taken: ${duration.toFixed(2)}s`);
     console.log(`Speed: ${(linesToProcess.length / duration).toFixed(2)} lines/sec`);
 }

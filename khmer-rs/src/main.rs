@@ -24,9 +24,9 @@ struct Args {
     #[arg(short, long)]
     input: String,
 
-    /// Output file (JSONL)
+    /// Output file (JSONL) - optional, skip to benchmark only
     #[arg(short, long)]
-    output: String,
+    output: Option<String>,
 
     /// Limit number of lines to process
     #[arg(short, long)]
@@ -69,8 +69,6 @@ fn main() -> anyhow::Result<()> {
     println!("Processing {} lines...", lines.len());
     let start_process = Instant::now();
 
-    let mut output_file = File::create(&args.output)?;
-
     // Parallel processing using Rayon
     // We collect results into a Vec first to ensure order is preserved and to keep IO out of the parallel section
     let results: Vec<String> = lines.par_iter()
@@ -87,13 +85,18 @@ fn main() -> anyhow::Result<()> {
         })
         .collect();
 
-    // Write results to file
-    for result in results {
-        writeln!(output_file, "{}", result)?;
+    // Write results to file only if output is specified
+    if let Some(ref output_path) = args.output {
+        let mut output_file = File::create(output_path)?;
+        for result in results {
+            writeln!(output_file, "{}", result)?;
+        }
     }
 
     let duration = start_process.elapsed();
-    println!("Done. Saved to {}", args.output);
+    if let Some(ref output_path) = args.output {
+        println!("Done. Saved to {}", output_path);
+    }
     println!("Time taken: {:.2}s", duration.as_secs_f32());
     println!("Speed: {:.2} lines/sec", lines.len() as f32 / duration.as_secs_f32());
 

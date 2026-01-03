@@ -13,30 +13,30 @@ This project takes the original Python implementation of a probabilistic Khmer w
 
 ## Benchmark Results
 
-Tested on the same hardware with 10,000 lines of real Khmer text:
+Tested on the same hardware with 3,329 lines of real Khmer text (Khmer Folktales corpus):
 
 | Language | Speed (lines/sec) | Speedup vs Python | Key Optimizations |
 |----------|-------------------|-------------------|-------------------|
-| **Go** | **155,911** | **255x** | Trie + 32 goroutines + sync.Pool |
-| **Rust** | 82,811 | 135x | Trie + FxHashMap + Rayon parallelism |
-| **C# (.NET)** | 57,080 | 93x | Trie + Parallel.For + Span<T> |
-| **C++** | 22,236 | 36x | Trie + Robin Hood HashMap + OpenMP |
-| **Java** | 21,834 | 36x | Trie + parallel streams + flat arrays |
-| **Node.js** | 9,087 | 15x | Trie + worker threads + charCode optimization |
-| **WASM** | 3,000 | 5x | AssemblyScript + Trie with flat array |
-| **Python** | 612 | 1x | Original reference implementation |
+| **Go** | **162,179** | **347x** | Trie + 32 goroutines + sync.Pool |
+| **Rust** | 91,104 | 195x | Trie + FxHashMap + Rayon parallelism |
+| **C# (.NET)** | 14,891 | 32x | Trie + Parallel.For + Span<T> |
+| **C++** | 13,362 | 29x | Trie + Robin Hood HashMap + OpenMP |
+| **Java** | 3,935 | 8x | Trie + parallel streams + flat arrays |
+| **Node.js** | 3,410 | 7x | Trie + worker threads + charCode optimization |
+| **WASM** | 2,705 | 6x | AssemblyScript + Trie with flat array |
+| **Python** | 468 | 1x | Original reference implementation |
 
 ### Performance Visualization
 
 ```
-Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 155,911
-Rust     ██████████████████████████████████████████████████████████████████████████████████ 82,811
-C#       ████████████████████████████████████████████████████████ 57,080
-C++      █████████████████████ 22,236
-Java     █████████████████████ 21,834
-Node.js  █████████ 9,087
-WASM     ███ 3,000
-Python   █ 612
+Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 162,179
+Rust     ███████████████████████████████████████████████████████████████████████████ 91,104
+C#       ████████████ 14,891
+C++      ███████████ 13,362
+Java     ███ 3,935
+Node.js  ███ 3,410
+WASM     ██ 2,705
+Python   █ 468
          └──────────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
 ```
 

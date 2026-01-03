@@ -40,11 +40,12 @@ func main() {
 
 	flag.Parse()
 
-	if *inputPath == "" || *outputPath == "" {
-		fmt.Fprintln(os.Stderr, "Usage: khmer --input <file> --output <file> [options]")
+	if *inputPath == "" {
+		fmt.Fprintln(os.Stderr, "Usage: khmer --input <file> [--output <file>] [options]")
 		fmt.Fprintln(os.Stderr, "Options:")
 		fmt.Fprintln(os.Stderr, "  --dict, -d <path>   Path to dictionary file")
 		fmt.Fprintln(os.Stderr, "  --freq, -f <path>   Path to frequency file")
+		fmt.Fprintln(os.Stderr, "  --output, -o <path> Output file (optional, skip to benchmark only)")
 		fmt.Fprintln(os.Stderr, "  --limit, -l <n>     Limit number of lines")
 		fmt.Fprintln(os.Stderr, "  --threads, -t <n>   Number of worker threads")
 		os.Exit(1)
@@ -151,23 +152,27 @@ func run(dictPath, freqPath, inputPath, outputPath string, limit, threads int) e
 	// Wait for all workers to complete
 	wg.Wait()
 
-	// Write results sequentially
-	outputFile, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("could not create output file: %w", err)
-	}
-	defer outputFile.Close()
+	// Write results sequentially (only if output specified)
+	if outputPath != "" {
+		outputFile, err := os.Create(outputPath)
+		if err != nil {
+			return fmt.Errorf("could not create output file: %w", err)
+		}
+		defer outputFile.Close()
 
-	writer := bufio.NewWriter(outputFile)
-	for _, jsonStr := range results {
-		writer.WriteString(jsonStr)
-		writer.WriteByte('\n')
+		writer := bufio.NewWriter(outputFile)
+		for _, jsonStr := range results {
+			writer.WriteString(jsonStr)
+			writer.WriteByte('\n')
+		}
+		writer.Flush()
 	}
-	writer.Flush()
 
 	duration := time.Since(startProcess).Seconds()
 
-	fmt.Printf("Done. Saved to %s\n", outputPath)
+	if outputPath != "" {
+		fmt.Printf("Done. Saved to %s\n", outputPath)
+	}
 	fmt.Printf("Time taken: %.2fs\n", duration)
 	fmt.Printf("Speed: %.2f lines/sec\n", float64(numLines)/duration)
 
