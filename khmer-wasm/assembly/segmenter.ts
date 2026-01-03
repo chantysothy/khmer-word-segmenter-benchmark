@@ -1,6 +1,7 @@
 
 import { globalDict } from "./dictionary";
 import * as Constants from "./constants";
+import { snapInvalidSingleConsonants, applyHeuristics, postProcessUnknowns } from "./heuristics";
 
 export function segment(text: string): string {
   // 1. Strip ZWS (simplification: assume input doesn't have many or handled outside,
@@ -88,11 +89,18 @@ export function segment(text: string): string {
       }
     }
 
-    // 3. Acronyms (Skipping implementation for brevity/speed unless strictly required,
-    // the C# port implemented simple heuristics. Let's do a simple one here if possible,
-    // otherwise rely on dict or unknown).
-    // Let's implement basic AcronymStart check to match C#.
-    // IsAcronymStart...
+    // 3. Acronym Grouping (Cluster + dot pattern, e.g., "១." or "ក.")
+    // Check if this position starts an acronym sequence
+    if (isAcronymStart(textRaw, i)) {
+      let acrLen = getAcronymLength(textRaw, i);
+      let nextIdx = i + acrLen;
+      // Acronyms are valid tokens, low cost
+      let stepCost: f32 = 1.0;
+      if (nextIdx <= n && currentCost + stepCost < dpCost[nextIdx]) {
+        dpCost[nextIdx] = currentCost + stepCost;
+        dpParent[nextIdx] = i;
+      }
+    }
 
     // 4. Dictionary Match - OPTIMIZED: use Trie lookup (no substring allocation!)
     let maxLen = globalDict.maxWordLength;
@@ -154,13 +162,15 @@ export function segment(text: string): string {
   // Segments are reversed
   segments.reverse();
 
-  // Post Processing (ApplyHeuristics) - Simply return joined for now to verify core algo
-  // or implement basic join rules.
-  // The C# port does Heuristics.ApplyHeuristics.
-  // Let's do a simple join with a delimiter.
-  // Using pipe '|' to separate words. The JS runner will split it back to array.
+  // Post Processing
+  // Pass 1: Snap Invalid Single Consonants
+  const pass1 = snapInvalidSingleConsonants(segments);
+  // Pass 2: Apply Heuristics (merge specific patterns)
+  const pass2 = applyHeuristics(pass1);
+  // Pass 3: Merge consecutive unknown words
+  const pass3 = postProcessUnknowns(pass2);
 
-  return segments.join("|");
+  return pass3.join("|");
 }
 
 function getNumberLength(text: string, startIndex: i32): i32 {
@@ -261,4 +271,52 @@ export function segmentBatch(content: string): string {
   }
 
   return result.join("\n");
+}
+
+/**
+ * Checks if position starts an acronym sequence (Cluster + .)
+ */
+function isAcronymStart(text: string, index: i32): boolean {
+  let n = text.length;
+  // Need at least 2 chars: Cluster + .
+  if (index + 1 >= n) return false;
+
+  // Get cluster length
+  let clusterLen = getKhmerClusterLength(text, index);
+  if (clusterLen == 0) return false;
+
+  // Check if char AFTER cluster is dot
+  let dotIndex = index + clusterLen;
+  if (dotIndex < n && text.charCodeAt(dotIndex) == 0x002E) { // '.'
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Returns length of acronym sequence starting at start_index.
+ * Matches pattern (Cluster + .)+
+ */
+function getAcronymLength(text: string, startIndex: i32): i32 {
+  let n = text.length;
+  let i = startIndex;
+
+  while (i < n) {
+    // Check for Cluster + Dot
+    let clusterLen = getKhmerClusterLength(text, i);
+    if (clusterLen > 0) {
+      let dotIndex = i + clusterLen;
+      if (dotIndex < n && text.charCodeAt(dotIndex) == 0x002E) { // '.'
+        i = dotIndex + 1; // Advance past cluster and dot
+        continue;
+      } else {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  return i - startIndex;
 }
