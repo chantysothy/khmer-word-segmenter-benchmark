@@ -1,112 +1,193 @@
 using System;
-using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace KhmerSegmenter
 {
+    /// <summary>
+    /// High-performance character classification using lookup tables.
+    /// Inspired by 1 Billion Row Challenge optimizations.
+    /// </summary>
     public static class Constants
     {
-        // Khmer Unicode Ranges
-        // Consonants: 1780-17A2
-        // Indep Vowels: 17A3-17B3
-        // Dep Vowels: 17B6-17C5
-        // Signs: 17C6-17D1, 17D3, 17DD
-        // Coeng (Subscript): 17D2
-        // Khmer Digits: 17E0-17E9
-        // Currency: 17DB (Riel)
+        // Lookup tables for O(1) character classification
+        // Table covers 0x0000 to 0x17FF (Khmer range + ASCII)
+        private const int TABLE_SIZE = 0x1800;
 
+        // Bit flags for character types
+        private const byte FLAG_DIGIT = 1;
+        private const byte FLAG_CONSONANT = 2;
+        private const byte FLAG_DEP_VOWEL = 4;
+        private const byte FLAG_SIGN = 8;
+        private const byte FLAG_SEPARATOR = 16;
+        private const byte FLAG_VALID_SINGLE = 32;
+        private const byte FLAG_KHMER = 64;
+        private const byte FLAG_CURRENCY = 128;
+
+        // Single lookup table with bit flags
+        private static readonly byte[] CharFlags;
+
+        static Constants()
+        {
+            CharFlags = new byte[TABLE_SIZE];
+            InitializeTable();
+        }
+
+        private static void InitializeTable()
+        {
+            // ASCII Digits (0-9)
+            for (int c = '0'; c <= '9'; c++)
+                CharFlags[c] |= FLAG_DIGIT;
+
+            // Khmer Digits (0x17E0-0x17E9)
+            for (int c = 0x17E0; c <= 0x17E9; c++)
+                CharFlags[c] |= FLAG_DIGIT;
+
+            // Khmer Consonants (0x1780-0x17A2)
+            for (int c = 0x1780; c <= 0x17A2; c++)
+                CharFlags[c] |= FLAG_CONSONANT;
+
+            // Dependent Vowels (0x17B6-0x17C5)
+            for (int c = 0x17B6; c <= 0x17C5; c++)
+                CharFlags[c] |= FLAG_DEP_VOWEL;
+
+            // Signs (0x17C6-0x17D1, 0x17D3, 0x17DD)
+            for (int c = 0x17C6; c <= 0x17D1; c++)
+                CharFlags[c] |= FLAG_SIGN;
+            CharFlags[0x17D3] |= FLAG_SIGN;
+            CharFlags[0x17DD] |= FLAG_SIGN;
+
+            // Khmer range (0x1780-0x17FF)
+            for (int c = 0x1780; c <= 0x17FF; c++)
+                CharFlags[c] |= FLAG_KHMER;
+
+            // Currency symbols
+            CharFlags['$'] |= FLAG_CURRENCY;
+            CharFlags[0x17DB] |= FLAG_CURRENCY; // Khmer Riel
+
+            // Separators - ASCII
+            CharFlags[' '] |= FLAG_SEPARATOR;
+            CharFlags['\t'] |= FLAG_SEPARATOR;
+            CharFlags['\n'] |= FLAG_SEPARATOR;
+            CharFlags['\r'] |= FLAG_SEPARATOR;
+            CharFlags['?'] |= FLAG_SEPARATOR;
+            CharFlags['!'] |= FLAG_SEPARATOR;
+            CharFlags['.'] |= FLAG_SEPARATOR;
+            CharFlags[','] |= FLAG_SEPARATOR;
+            CharFlags[':'] |= FLAG_SEPARATOR;
+            CharFlags[';'] |= FLAG_SEPARATOR;
+            CharFlags['"'] |= FLAG_SEPARATOR;
+            CharFlags['\''] |= FLAG_SEPARATOR;
+            CharFlags['('] |= FLAG_SEPARATOR;
+            CharFlags[')'] |= FLAG_SEPARATOR;
+            CharFlags['['] |= FLAG_SEPARATOR;
+            CharFlags[']'] |= FLAG_SEPARATOR;
+            CharFlags['{'] |= FLAG_SEPARATOR;
+            CharFlags['}'] |= FLAG_SEPARATOR;
+            CharFlags['-'] |= FLAG_SEPARATOR;
+            CharFlags['/'] |= FLAG_SEPARATOR;
+            CharFlags['$'] |= FLAG_SEPARATOR;
+            CharFlags['%'] |= FLAG_SEPARATOR;
+            CharFlags[0x00AB] |= FLAG_SEPARATOR; // «
+            CharFlags[0x00BB] |= FLAG_SEPARATOR; // »
+            CharFlags[0x02DD] |= FLAG_SEPARATOR; // ˝
+
+            // Khmer punctuation range (0x17D4-0x17DB)
+            for (int c = 0x17D4; c <= 0x17DB; c++)
+                CharFlags[c] |= FLAG_SEPARATOR;
+
+            // Valid single words - Consonants
+            CharFlags[0x1780] |= FLAG_VALID_SINGLE; // ក
+            CharFlags[0x1781] |= FLAG_VALID_SINGLE; // ខ
+            CharFlags[0x1782] |= FLAG_VALID_SINGLE; // គ
+            CharFlags[0x1784] |= FLAG_VALID_SINGLE; // ង
+            CharFlags[0x1785] |= FLAG_VALID_SINGLE; // ច
+            CharFlags[0x1786] |= FLAG_VALID_SINGLE; // ឆ
+            CharFlags[0x1789] |= FLAG_VALID_SINGLE; // ញ
+            CharFlags[0x178A] |= FLAG_VALID_SINGLE; // ដ
+            CharFlags[0x178F] |= FLAG_VALID_SINGLE; // ត
+            CharFlags[0x1791] |= FLAG_VALID_SINGLE; // ទ
+            CharFlags[0x1796] |= FLAG_VALID_SINGLE; // ព
+            CharFlags[0x179A] |= FLAG_VALID_SINGLE; // រ
+            CharFlags[0x179B] |= FLAG_VALID_SINGLE; // ល
+            CharFlags[0x179F] |= FLAG_VALID_SINGLE; // ស
+            CharFlags[0x17A1] |= FLAG_VALID_SINGLE; // ឡ
+
+            // Valid single words - Independent Vowels
+            CharFlags[0x17A6] |= FLAG_VALID_SINGLE; // ឦ
+            CharFlags[0x17A7] |= FLAG_VALID_SINGLE; // ឧ
+            CharFlags[0x17AA] |= FLAG_VALID_SINGLE; // ឪ
+            CharFlags[0x17AC] |= FLAG_VALID_SINGLE; // ឬ
+            CharFlags[0x17AE] |= FLAG_VALID_SINGLE; // ឮ
+            CharFlags[0x17AF] |= FLAG_VALID_SINGLE; // ឯ
+            CharFlags[0x17B1] |= FLAG_VALID_SINGLE; // ឱ
+            CharFlags[0x17B3] |= FLAG_VALID_SINGLE; // ឳ
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsDigit(char c)
         {
-            return (c >= '0' && c <= '9') || (c >= 0x17E0 && c <= 0x17E9);
+            int code = c;
+            return code < TABLE_SIZE && (CharFlags[code] & FLAG_DIGIT) != 0;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsConsonant(char c)
         {
-            return c >= 0x1780 && c <= 0x17A2;
+            int code = c;
+            return code < TABLE_SIZE && (CharFlags[code] & FLAG_CONSONANT) != 0;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsDependentVowel(char c)
         {
-            return c >= 0x17B6 && c <= 0x17C5;
+            int code = c;
+            return code < TABLE_SIZE && (CharFlags[code] & FLAG_DEP_VOWEL) != 0;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsSign(char c)
         {
-            return (c >= 0x17C6 && c <= 0x17D1) || c == 0x17D3 || c == 0x17DD;
+            int code = c;
+            return code < TABLE_SIZE && (CharFlags[code] & FLAG_SIGN) != 0;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsCoeng(char c)
         {
-            return c == 0x17D2;
+            return c == '\u17D2';
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsKhmerChar(char c)
         {
-            return (c >= 0x1780 && c <= 0x17FF) || (c >= 0x19E0 && c <= 0x19FF);
+            int code = c;
+            // Include extended Khmer range (0x19E0-0x19FF) with direct check
+            return (code < TABLE_SIZE && (CharFlags[code] & FLAG_KHMER) != 0)
+                   || (code >= 0x19E0 && code <= 0x19FF);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsCurrencySymbol(char c)
         {
-            // $, ៛ (17DB)
-            return c == '$' || c == 0x17DB;
+            int code = c;
+            return code < TABLE_SIZE && (CharFlags[code] & FLAG_CURRENCY) != 0;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsSeparator(char c)
         {
-            // Khmer Punctuation range (17D4-17DA) including ។ ៕ ៖ ៗ etc.
-            if (c >= 0x17D4 && c <= 0x17DA)
-                return true;
-            // Khmer Currency Symbol ៛ (17DB)
-            if (c == 0x17DB)
-                return true;
-            // Standard ASCII punctuation and whitespace
-            // Match Python: '!?.,;:"\\'()[]{}-/ «»""˝$%'
-            return c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
-                   c == '?' || c == '!' || c == '.' || c == ',' || c == ':' || c == ';' ||
-                   c == '"' || c == '\'' || c == '(' || c == ')' || c == '[' || c == ']' ||
-                   c == '{' || c == '}' || c == '-' || c == '/' || c == ' ' ||
-                   c == '«' || c == '»' ||    // U+00AB, U+00BB - Angle quotes
-                   c == '\u201C' || c == '\u201D' ||    // U+201C, U+201D - Curly double quotes
-                   c == '˝' ||                // U+02DD - Double acute accent
-                   c == '$' || c == '%';      // Currency and percent
+            int code = c;
+            if (code < TABLE_SIZE)
+                return (CharFlags[code] & FLAG_SEPARATOR) != 0;
+            // Unicode curly quotes (outside table range)
+            return c == '\u201C' || c == '\u201D';
         }
 
-        // Valid Single Words (Consonants/Indep Vowels that can stand alone)
-        // Must match Python exactly: viterbi.py line 13-16
-        private static readonly HashSet<char> ValidSingleWords = new HashSet<char>
-        {
-            // Consonants (specific subset from Python)
-            '\u1780', // ក Ka
-            '\u1781', // ខ Kha
-            '\u1782', // គ Ko
-            '\u1784', // ង Ngo
-            '\u1785', // ច Ca
-            '\u1786', // ឆ Cha
-            '\u1789', // ញ Nyo
-            '\u178A', // ដ Da
-            '\u178F', // ត Ta
-            '\u1791', // ទ Tho
-            '\u1796', // ព Po
-            '\u179A', // រ Ro
-            '\u179B', // ល Lo
-            '\u179F', // ស Sa
-            '\u17A1', // ឡ La
-            // Independent Vowels
-            '\u17AC', // ឬ
-            '\u17AE', // ឮ
-            '\u17AA', // ឪ
-            '\u17AF', // ឯ
-            '\u17B1', // ឱ
-            '\u17A6', // ឦ
-            '\u17A7', // ឧ
-            '\u17B3'  // ឳ
-        };
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsValidSingleWord(char c)
         {
-             // Simply check if it's in the set.
-             // Note: in Python implementation, IsValidSingleWord usually checks dictionary or whitelist.
-             // We'll trust the set.
-             return ValidSingleWords.Contains(c);
+            int code = c;
+            return code < TABLE_SIZE && (CharFlags[code] & FLAG_VALID_SINGLE) != 0;
         }
     }
 }

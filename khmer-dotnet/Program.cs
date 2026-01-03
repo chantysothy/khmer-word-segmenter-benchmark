@@ -1,8 +1,10 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Text.Json;
+using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace KhmerSegmenter
 {
@@ -10,10 +12,10 @@ namespace KhmerSegmenter
     {
         class Args
         {
-            public string DictPath { get; set; }
-            public string FreqPath { get; set; }
-            public string InputPath { get; set; }
-            public string OutputPath { get; set; }
+            public string DictPath { get; set; } = "";
+            public string FreqPath { get; set; } = "";
+            public string InputPath { get; set; } = "";
+            public string OutputPath { get; set; } = "";
             public int? Limit { get; set; }
         }
 
@@ -69,26 +71,17 @@ namespace KhmerSegmenter
                 // Segmenter is thread-safe (stateless except for read-only dictionary)
                 var segments = segmenter.Segment(line);
 
-                var record = new OutputRecord
-                {
-                    id = i,
-                    input = line,
-                    segments = segments
-                };
-
-                // Serialize in parallel
-                results[i] = JsonSerializer.Serialize(record);
+                // Use custom fast JSON builder instead of System.Text.Json
+                results[i] = FastJson.BuildRecord(i, line, segments);
             });
 
             // Write results only if output is specified
             if (!string.IsNullOrEmpty(parsedArgs.OutputPath))
             {
-                using (var writer = new StreamWriter(parsedArgs.OutputPath))
+                using var writer = new StreamWriter(parsedArgs.OutputPath, false, new UTF8Encoding(false), 65536);
+                foreach (var json in results)
                 {
-                    foreach (var json in results)
-                    {
-                        writer.WriteLine(json);
-                    }
+                    writer.WriteLine(json);
                 }
             }
 
@@ -162,12 +155,76 @@ namespace KhmerSegmenter
 
             return parsed;
         }
+    }
 
-        class OutputRecord
+    /// <summary>
+    /// High-performance JSON builder avoiding System.Text.Json overhead.
+    /// Inspired by 1 Billion Row Challenge optimizations.
+    /// </summary>
+    internal static class FastJson
+    {
+        [ThreadStatic]
+        private static StringBuilder? _sb;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static string BuildRecord(int id, string input, List<string> segments)
         {
-            public int id { get; set; }
-            public string input { get; set; }
-            public List<string> segments { get; set; }
+            var sb = _sb ??= new StringBuilder(512);
+            sb.Clear();
+
+            sb.Append("{\"id\":");
+            sb.Append(id);
+            sb.Append(",\"input\":\"");
+            EscapeString(sb, input);
+            sb.Append("\",\"segments\":[");
+
+            for (int i = 0; i < segments.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append('"');
+                EscapeString(sb, segments[i]);
+                sb.Append('"');
+            }
+
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void EscapeString(StringBuilder sb, string s)
+        {
+            foreach (char c in s)
+            {
+                switch (c)
+                {
+                    case '"':
+                        sb.Append("\\\"");
+                        break;
+                    case '\\':
+                        sb.Append("\\\\");
+                        break;
+                    case '\n':
+                        sb.Append("\\n");
+                        break;
+                    case '\r':
+                        sb.Append("\\r");
+                        break;
+                    case '\t':
+                        sb.Append("\\t");
+                        break;
+                    default:
+                        if (c < 32)
+                        {
+                            sb.Append("\\u");
+                            sb.Append(((int)c).ToString("x4"));
+                        }
+                        else
+                        {
+                            sb.Append(c);
+                        }
+                        break;
+                }
+            }
         }
     }
 }
