@@ -17,28 +17,28 @@ Tested on the same hardware with 10,000 lines of Khmer text:
 
 | Language | Speed (lines/sec) | Speedup vs Python | Key Optimizations |
 |----------|-------------------|-------------------|-------------------|
-| **Go** | **246,211** | **392x** | Trie + 32 goroutines + sync.Pool |
-| **Rust** | 128,146 | 204x | Trie + FxHashMap + Rayon parallelism |
-| **Java** | 24,213 | 39x | Trie + parallel streams + flat arrays |
-| **C# (.NET)** | 23,608 | 38x | Trie + Parallel.For + Span<T> |
-| **C++** | 23,446 | 37x | Trie + Robin Hood HashMap + OpenMP |
-| **Node.js** | 10,017 | 16x | Trie + worker threads + charCode optimization |
-| **Bun** | 9,242 | 15x | Trie + Web Workers + TypedArray buffers |
-| **WASM** | 2,894 | 5x | AssemblyScript + Trie with flat array |
-| **Python** | 628 | 1x | Original reference implementation |
+| **Go** | **165,751** | **263x** | Trie + 32 goroutines + sync.Pool |
+| **Rust** | 78,573 | 125x | Trie + FxHashMap + Rayon parallelism |
+| **C++** | 22,899 | 36x | Trie + Robin Hood HashMap + OpenMP |
+| **C# (.NET)** | 21,420 | 34x | Trie + Parallel.For + Span<T> |
+| **Java** | 20,747 | 33x | Trie + parallel streams + flat arrays |
+| **Node.js** | 9,675 | 15x | Trie + worker threads + charCode optimization |
+| **Bun** | 9,167 | 15x | Trie + Web Workers + TypedArray buffers |
+| **WASM** | 9,004 | 14x | AssemblyScript + worker threads + lookup tables |
+| **Python** | 630 | 1x | Original reference implementation |
 
 ### Performance Visualization
 
 ```
-Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 246,211
-Rust     ████████████████████████████████████████████████████████████████████████████ 128,146
-Java     ███████████████ 24,213
-C#       ██████████████ 23,608
-C++      ██████████████ 23,446
-Node.js  ██████ 10,017
-Bun      ██████ 9,242
-WASM     ██ 2,894
-Python   █ 628
+Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 165,751
+Rust     ███████████████████████████████████████████████████████████████████████ 78,573
+C++      █████████████████████ 22,899
+C#       ███████████████████ 21,420
+Java     ███████████████████ 20,747
+Node.js  █████████ 9,675
+Bun      ████████ 9,167
+WASM     ████████ 9,004
+Python   █ 630
          └──────────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
 ```
 

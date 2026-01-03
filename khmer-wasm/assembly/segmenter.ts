@@ -3,116 +3,242 @@ import { globalDict } from "./dictionary";
 import * as Constants from "./constants";
 import { snapInvalidSingleConsonants, applyHeuristics, postProcessUnknowns } from "./heuristics";
 
-export function segment(text: string): string {
-  // 1. Strip ZWS (simplification: assume input doesn't have many or handled outside,
-  // but strict parity requires handling. AS string replaceAll is available in recent versions or standard lib).
-  // For raw speed in AS, simple replacement loop or just ignoring.
-  // Standard String.replaceAll might be heavy. Let's do a quick cleaner pass if needed.
-  // Actually, Viterbi is robust to ZWS usually if they are treated as separators or ignored.
-  // C# implementation: text.Replace("\u200b", "")
+// Pre-allocated buffers for reuse (avoids GC pressure)
+// These grow as needed but are never shrunk
+let dpCostBuffer: Float32Array | null = null;
+let dpParentBuffer: Int32Array | null = null;
+let currentBufferSize: i32 = 0;
 
-  let textRaw = text.replaceAll(String.fromCharCode(Constants.ZERO_WIDTH_SPACE), "");
+function ensureBuffers(size: i32): void {
+  if (dpCostBuffer === null || currentBufferSize < size) {
+    const newSize = size + 256; // Add extra capacity
+    dpCostBuffer = new Float32Array(newSize);
+    dpParentBuffer = new Int32Array(newSize);
+    currentBufferSize = newSize;
+  }
+}
+
+/**
+ * Get the length of a number sequence starting at startIndex
+ */
+@inline
+function getNumberLength(text: string, startIndex: i32): i32 {
+  const n = text.length;
+  let i = startIndex;
+
+  // Check if starts with currency symbol followed by digit
+  const firstCode = text.charCodeAt(i);
+  if (firstCode == 0x17DB) { // Khmer Riel
+    if (i + 1 < n && Constants.isDigit(text.charCodeAt(i + 1))) {
+      i++;
+    } else {
+      return 0;
+    }
+  }
+
+  if (!Constants.isDigit(text.charCodeAt(i))) return 0;
+  i++;
+
+  while (i < n) {
+    const c = text.charCodeAt(i);
+    if (Constants.isDigit(c)) {
+      i++;
+      continue;
+    }
+    // Allow separators in numbers: , . space
+    if (c == 0x002C || c == 0x002E || c == 0x0020) {
+      if (i + 1 < n && Constants.isDigit(text.charCodeAt(i + 1))) {
+        i += 2;
+        continue;
+      }
+    }
+    break;
+  }
+
+  return i - startIndex;
+}
+
+/**
+ * Get the length of a Khmer syllable cluster starting at startIndex
+ */
+@inline
+function getKhmerClusterLength(text: string, startIndex: i32): i32 {
+  const n = text.length;
+  if (startIndex >= n) return 0;
+
+  let i = startIndex;
+  const c = text.charCodeAt(i);
+
+  // Base consonant or independent vowel (0x1780-0x17B3)
+  if (!(c >= 0x1780 && c <= 0x17B3)) {
+    return 1;
+  }
+  i++;
+
+  while (i < n) {
+    const current = text.charCodeAt(i);
+
+    // Coeng (0x17D2) + Consonant (0x1780-0x17A2)
+    if (current == 0x17D2) {
+      if (i + 1 < n) {
+        const next = text.charCodeAt(i + 1);
+        if (next >= 0x1780 && next <= 0x17A2) {
+          i += 2;
+          continue;
+        }
+      }
+      break;
+    }
+
+    // Dependent vowel (0x17B6-0x17C5) or sign
+    if ((current >= 0x17B6 && current <= 0x17C5) || Constants.isSign(current)) {
+      i++;
+      continue;
+    }
+
+    break;
+  }
+
+  return i - startIndex;
+}
+
+/**
+ * Check if position starts an acronym sequence (Cluster + .)
+ */
+@inline
+function isAcronymStart(text: string, index: i32): boolean {
+  const n = text.length;
+  if (index + 1 >= n) return false;
+
+  const clusterLen = getKhmerClusterLength(text, index);
+  if (clusterLen == 0) return false;
+
+  const dotIndex = index + clusterLen;
+  return dotIndex < n && text.charCodeAt(dotIndex) == 0x002E;
+}
+
+/**
+ * Get the length of an acronym sequence starting at startIndex
+ */
+@inline
+function getAcronymLength(text: string, startIndex: i32): i32 {
+  const n = text.length;
+  let i = startIndex;
+
+  while (i < n) {
+    const clusterLen = getKhmerClusterLength(text, i);
+    if (clusterLen > 0) {
+      const dotIndex = i + clusterLen;
+      if (dotIndex < n && text.charCodeAt(dotIndex) == 0x002E) {
+        i = dotIndex + 1;
+        continue;
+      }
+    }
+    break;
+  }
+
+  return i - startIndex;
+}
+
+export function segment(text: string): string {
+  // Remove zero-width spaces - check first (most strings don't have it)
+  let textRaw = text;
+  if (text.indexOf(String.fromCharCode(Constants.ZERO_WIDTH_SPACE)) != -1) {
+    textRaw = text.replaceAll(String.fromCharCode(Constants.ZERO_WIDTH_SPACE), "");
+  }
   if (textRaw.length == 0) return "";
 
   const n = textRaw.length;
 
-  // DP Arrays
-  // In AS, we can use static memory or TypedArrays.
-  // TypedArrays are objects on the heap.
-  // new Float32Array(n + 1)
-  const dpCost = new Float32Array(n + 1);
-  const dpParent = new Int32Array(n + 1);
+  // Ensure buffers are allocated
+  ensureBuffers(n + 1);
+  const dpCost = dpCostBuffer!;
+  const dpParent = dpParentBuffer!;
 
   // Initialize
-  for (let i = 0; i <= n; i++) {
+  for (let i: i32 = 0; i <= n; i++) {
     dpCost[i] = <f32>Infinity;
     dpParent[i] = -1;
   }
   dpCost[0] = 0.0;
 
-  for (let i = 0; i < n; i++) {
+  // Cache frequently accessed values
+  const maxLen = globalDict.maxWordLength;
+  const unknownCost = globalDict.unknownCost;
+
+  for (let i: i32 = 0; i < n; i++) {
     if (dpCost[i] == <f32>Infinity) continue;
 
     const currentCost = dpCost[i];
+    const charI = textRaw.charCodeAt(i);
     let forceRepair = false;
 
     // Repair Mode Checks
-    // 1. Prev char was Coeng (17D2)
-    if (i > 0 && Constants.isCoeng(textRaw.charCodeAt(i - 1))) {
+    if (i > 0 && textRaw.charCodeAt(i - 1) == 0x17D2) {
       forceRepair = true;
     }
-    // 2. Curr char is Dependent Vowel
-    if (Constants.isDependentVowel(textRaw.charCodeAt(i))) {
+    if (charI >= 0x17B6 && charI <= 0x17C5) {
       forceRepair = true;
     }
 
     if (forceRepair) {
-      let nextIdx = i + 1;
-      let newCost = currentCost + globalDict.unknownCost + 50.0;
-      if (nextIdx <= n) {
-        if (newCost < dpCost[nextIdx]) {
-          dpCost[nextIdx] = newCost;
-          dpParent[nextIdx] = i;
-        }
+      const nextIdx = i + 1;
+      const newCost = currentCost + unknownCost + 50.0;
+      if (nextIdx <= n && newCost < dpCost[nextIdx]) {
+        dpCost[nextIdx] = newCost;
+        dpParent[nextIdx] = i;
       }
       continue;
     }
 
-    const charI = textRaw.charCodeAt(i);
-
-    // 1. Numbers / Digits
-    let isDigitChar = Constants.isDigit(charI);
+    // 1. Numbers/Digits
+    const isDigitChar = Constants.isDigit(charI);
     let isCurrencyStart = false;
-    if (Constants.isCurrencySymbol(charI)) {
+    if (charI == 0x17DB) { // Khmer Riel
       if (i + 1 < n && Constants.isDigit(textRaw.charCodeAt(i + 1))) {
         isCurrencyStart = true;
       }
     }
 
     if (isDigitChar || isCurrencyStart) {
-      // Get number length
-      let numLen = getNumberLength(textRaw, i);
-      let nextIdx = i + numLen;
-      let stepCost: f32 = 1.0;
+      const numLen = getNumberLength(textRaw, i);
+      const nextIdx = i + numLen;
+      const stepCost: f32 = 1.0;
       if (nextIdx <= n && currentCost + stepCost < dpCost[nextIdx]) {
         dpCost[nextIdx] = currentCost + stepCost;
         dpParent[nextIdx] = i;
       }
     }
+
     // 2. Separators
-    else if (Constants.isSeparator(charI)) {
-      let nextIdx = i + 1;
-      let stepCost: f32 = 0.1;
+    if (Constants.isSeparator(charI)) {
+      const nextIdx = i + 1;
+      const stepCost: f32 = 0.1;
       if (nextIdx <= n && currentCost + stepCost < dpCost[nextIdx]) {
         dpCost[nextIdx] = currentCost + stepCost;
         dpParent[nextIdx] = i;
       }
     }
 
-    // 3. Acronym Grouping (Cluster + dot pattern, e.g., "១." or "ក.")
-    // Check if this position starts an acronym sequence
+    // 3. Acronym Grouping
     if (isAcronymStart(textRaw, i)) {
-      let acrLen = getAcronymLength(textRaw, i);
-      let nextIdx = i + acrLen;
-      // Acronyms are valid tokens, low cost
-      let stepCost: f32 = 1.0;
+      const acrLen = getAcronymLength(textRaw, i);
+      const nextIdx = i + acrLen;
+      const stepCost: f32 = 1.0;
       if (nextIdx <= n && currentCost + stepCost < dpCost[nextIdx]) {
         dpCost[nextIdx] = currentCost + stepCost;
         dpParent[nextIdx] = i;
       }
     }
 
-    // 4. Dictionary Match - OPTIMIZED: use Trie lookup (no substring allocation!)
-    let maxLen = globalDict.maxWordLength;
+    // 4. Dictionary Match (Trie lookup - no substring allocation)
     let endLimit = i + maxLen;
     if (endLimit > n) endLimit = n;
 
-    for (let j = i + 1; j <= endLimit; j++) {
-      // Use Trie range lookup instead of substring + Map lookup
-      let wordCost = globalDict.lookupRange(textRaw, i, j);
-
+    for (let j: i32 = i + 1; j <= endLimit; j++) {
+      const wordCost = globalDict.lookupRange(textRaw, i, j);
       if (wordCost >= 0) {
-        let newCost = currentCost + wordCost;
+        const newCost = currentCost + wordCost;
         if (newCost < dpCost[j]) {
           dpCost[j] = newCost;
           dpParent[j] = i;
@@ -121,120 +247,53 @@ export function segment(text: string): string {
     }
 
     // 5. Unknown Cluster
-    if (Constants.isKhmerChar(charI)) {
-      let clusterLen = getKhmerClusterLength(textRaw, i);
-      let stepCost = globalDict.unknownCost;
-      if (clusterLen == 1) {
-        if (!Constants.isValidSingleWord(charI)) {
-          stepCost += 10.0;
-        }
+    if (charI >= 0x1780 && charI <= 0x17FF) { // isKhmerChar inlined
+      const clusterLen = getKhmerClusterLength(textRaw, i);
+      let stepCost = unknownCost;
+      if (clusterLen == 1 && !Constants.isValidSingleWord(charI)) {
+        stepCost += 10.0;
       }
-      let nextIdx = i + clusterLen;
-      if (nextIdx <= n) {
-        if (currentCost + stepCost < dpCost[nextIdx]) {
-          dpCost[nextIdx] = currentCost + stepCost;
-          dpParent[nextIdx] = i;
-        }
+      const nextIdx = i + clusterLen;
+      if (nextIdx <= n && currentCost + stepCost < dpCost[nextIdx]) {
+        dpCost[nextIdx] = currentCost + stepCost;
+        dpParent[nextIdx] = i;
       }
     } else {
       // Non-Khmer (Latin, etc)
-      let clusterLen = 1;
-      let stepCost = globalDict.unknownCost;
-      let nextIdx = i + clusterLen;
-      if (nextIdx <= n) {
-        if (currentCost + stepCost < dpCost[nextIdx]) {
-          dpCost[nextIdx] = currentCost + stepCost;
-          dpParent[nextIdx] = i;
-        }
+      const nextIdx = i + 1;
+      if (nextIdx <= n && currentCost + unknownCost < dpCost[nextIdx]) {
+        dpCost[nextIdx] = currentCost + unknownCost;
+        dpParent[nextIdx] = i;
       }
     }
   }
 
   // Backtrack
-  let segments = new Array<string>();
+  const segments = new Array<string>();
   let curr = n;
   while (curr > 0) {
-    let prev = dpParent[curr];
-    if (prev == -1) break; // Error
+    const prev = dpParent[curr];
+    if (prev == -1) break;
     segments.push(textRaw.substring(prev, curr));
     curr = prev;
   }
-  // Segments are reversed
   segments.reverse();
 
-  // Post Processing
-  // Pass 1: Snap Invalid Single Consonants
+  // Post-processing
   const pass1 = snapInvalidSingleConsonants(segments);
-  // Pass 2: Apply Heuristics (merge specific patterns)
   const pass2 = applyHeuristics(pass1);
-  // Pass 3: Merge consecutive unknown words
   const pass3 = postProcessUnknowns(pass2);
 
   return pass3.join("|");
 }
 
-function getNumberLength(text: string, startIndex: i32): i32 {
-  let n = text.length;
-  let i = startIndex;
-  if (!Constants.isDigit(text.charCodeAt(i))) return 0;
-  i++;
-  while (i < n) {
-    let c = text.charCodeAt(i);
-    if (Constants.isDigit(c)) {
-      i++;
-      continue;
-    }
-    // Check , . space
-    if (c == 0x002C || c == 0x002E || c == 0x0020) {
-       if (i + 1 < n && Constants.isDigit(text.charCodeAt(i + 1))) {
-         i += 2;
-         continue;
-       }
-    }
-    break;
-  }
-  return i - startIndex;
-}
-
-function getKhmerClusterLength(text: string, startIndex: i32): i32 {
-  let n = text.length;
-  if (startIndex >= n) return 0;
-  let i = startIndex;
-  let c = text.charCodeAt(i);
-
-  // Base Consonant or Independent Vowel
-  if ( !((c >= 0x1780 && c <= 0x17B3)) ) {
-    return 1;
-  }
-  i++;
-  while (i < n) {
-    let current = text.charCodeAt(i);
-    if (Constants.isCoeng(current)) {
-      if (i + 1 < n) {
-        let nextC = text.charCodeAt(i + 1);
-        if (Constants.isConsonant(nextC)) {
-          i += 2;
-          continue;
-        }
-      }
-      break;
-    }
-    if (Constants.isDependentVowel(current) || Constants.isSign(current)) {
-      i++;
-      continue;
-    }
-    break;
-  }
-  return i - startIndex;
-}
-
 export function segmentBatch(content: string): string {
-  let result = new Array<string>();
-  let len = content.length;
-  let start = 0;
+  const result = new Array<string>();
+  const len = content.length;
+  let start: i32 = 0;
 
-  for (let i = 0; i < len; i++) {
-    let c = content.charCodeAt(i);
+  for (let i: i32 = 0; i < len; i++) {
+    const c = content.charCodeAt(i);
     if (c == 10) { // \n
       let end = i;
       // Handle \r
@@ -242,17 +301,9 @@ export function segmentBatch(content: string): string {
         end--;
       }
 
-      let line = content.substring(start, end);
+      const line = content.substring(start, end);
       if (line.length > 0) {
-         result.push(segment(line));
-      } else {
-         // Keep empty lines? The python runner filters them out in load.
-         // "lines = [line.strip() for line in f if line.strip()]"
-         // But here we are processing raw content.
-         // If we skip empty lines here, the output count might mismatch if the input had empty lines that were significant?
-         // The benchmark script passes a file where every line is valid text generated.
-         // But the runner.js does: lines.filter(line => line.trim().length > 0)
-         // So we should mimic that.
+        result.push(segment(line));
       }
       start = i + 1;
     }
@@ -264,59 +315,11 @@ export function segmentBatch(content: string): string {
     if (end > start && content.charCodeAt(end - 1) == 13) {
       end--;
     }
-    let line = content.substring(start, end);
+    const line = content.substring(start, end);
     if (line.length > 0) {
       result.push(segment(line));
     }
   }
 
   return result.join("\n");
-}
-
-/**
- * Checks if position starts an acronym sequence (Cluster + .)
- */
-function isAcronymStart(text: string, index: i32): boolean {
-  let n = text.length;
-  // Need at least 2 chars: Cluster + .
-  if (index + 1 >= n) return false;
-
-  // Get cluster length
-  let clusterLen = getKhmerClusterLength(text, index);
-  if (clusterLen == 0) return false;
-
-  // Check if char AFTER cluster is dot
-  let dotIndex = index + clusterLen;
-  if (dotIndex < n && text.charCodeAt(dotIndex) == 0x002E) { // '.'
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Returns length of acronym sequence starting at start_index.
- * Matches pattern (Cluster + .)+
- */
-function getAcronymLength(text: string, startIndex: i32): i32 {
-  let n = text.length;
-  let i = startIndex;
-
-  while (i < n) {
-    // Check for Cluster + Dot
-    let clusterLen = getKhmerClusterLength(text, i);
-    if (clusterLen > 0) {
-      let dotIndex = i + clusterLen;
-      if (dotIndex < n && text.charCodeAt(dotIndex) == 0x002E) { // '.'
-        i = dotIndex + 1; // Advance past cluster and dot
-        continue;
-      } else {
-        break;
-      }
-    } else {
-      break;
-    }
-  }
-
-  return i - startIndex;
 }
