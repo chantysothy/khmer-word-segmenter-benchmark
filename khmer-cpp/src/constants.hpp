@@ -95,15 +95,15 @@ inline bool is_valid_single_word(char32_t c) {
         case 0x179B: // ល
         case 0x179F: // ស
         case 0x17A1: // ឡ
-        // Independent Vowels
+        // Independent Vowels - MUST match Python exactly
         case 0x17AC: // ឬ
-        case 0x17AD: // ឮ
+        case 0x17AE: // ឮ
         case 0x17AA: // ឪ
-        case 0x17A6: // ឯ
-        case 0x17A3: // ឱ
-        case 0x17A7: // ឦ
-        case 0x17A4: // ឧ
-        case 0x17A9: // ឳ
+        case 0x17AF: // ឯ
+        case 0x17B1: // ឱ
+        case 0x17A6: // ឦ
+        case 0x17A7: // ឧ
+        case 0x17B3: // ឳ
             return true;
         default:
             return false;
