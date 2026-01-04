@@ -376,7 +376,7 @@ def benchmark_cpp():
         "--dict", os.path.join(DATA_DIR, "khmer_dictionary_words.txt"),
         "--freq", os.path.join(DATA_DIR, "khmer_word_frequencies.json"),
         "--input", INPUT_FILE,
-        "--threads", "1"  # Single-threaded for fair comparison
+        "--threads", "8"  # Use OpenMP parallelization
     ]
     if not NO_OUTPUT:
         cmd.extend(["--output", TEMP_OUTPUT_CPP])
