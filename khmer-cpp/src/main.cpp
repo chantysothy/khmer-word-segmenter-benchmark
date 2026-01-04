@@ -210,8 +210,8 @@ int main(int argc, char* argv[]) {
     // 5. Output with buffered I/O
     if (!args.output_path.empty()) {
         std::ofstream outfile(args.output_path);
-        // Use larger buffer for better I/O performance
-        char buffer[65536];
+        // 1BRC: Use larger buffer for better I/O performance (256KB)
+        char buffer[262144];
         outfile.rdbuf()->pubsetbuf(buffer, sizeof(buffer));
         for (const auto& res : results) {
             outfile << res << "\n";

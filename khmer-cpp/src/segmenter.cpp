@@ -6,10 +6,32 @@
 
 namespace khmer {
 
-// UTF-8 to codepoint conversion
+// ============================================================================
+// 1BRC Optimization: Thread-local buffers for zero-allocation hot path
+// ============================================================================
+
+// Thread-local buffers to avoid per-call allocation
+struct ThreadLocalBuffers {
+    std::vector<char32_t> codepoints;
+    std::vector<float> dp_cost;
+    std::vector<int32_t> dp_parent;
+    std::vector<std::string> segments;
+    std::string utf8_buffer;
+
+    ThreadLocalBuffers() {
+        codepoints.reserve(4096);
+        dp_cost.reserve(4096);
+        dp_parent.reserve(4096);
+        segments.reserve(256);
+        utf8_buffer.reserve(256);
+    }
+};
+
+static thread_local ThreadLocalBuffers tl_buffers;
+
+// UTF-8 to codepoint conversion (reuses thread-local buffer)
 static void utf8_to_codepoints(std::string_view text, std::vector<char32_t>& out) {
     out.clear();
-    out.reserve(text.size());
     size_t i = 0;
     while (i < text.length()) {
         auto [cp, len] = get_char_at(text, i);
@@ -17,6 +39,63 @@ static void utf8_to_codepoints(std::string_view text, std::vector<char32_t>& out
         out.push_back(cp);
         i += len;
     }
+}
+
+// 1BRC: Fast codepoint range to UTF-8 (avoids intermediate u32string)
+static void codepoints_to_utf8_fast(const char32_t* cps, size_t start, size_t end, std::string& out) {
+    out.clear();
+    for (size_t i = start; i < end; ++i) {
+        char32_t c = cps[i];
+        if (c <= 0x7F) {
+            out.push_back(static_cast<char>(c));
+        } else if (c <= 0x7FF) {
+            out.push_back(static_cast<char>(0xC0 | ((c >> 6) & 0x1F)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        } else if (c <= 0xFFFF) {
+            out.push_back(static_cast<char>(0xE0 | ((c >> 12) & 0x0F)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        } else if (c <= 0x10FFFF) {
+            out.push_back(static_cast<char>(0xF0 | ((c >> 18) & 0x07)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        }
+    }
+}
+
+// 1BRC: Fast first codepoint extraction (avoids full u32string conversion)
+static inline char32_t get_first_codepoint(const std::string& s) {
+    if (s.empty()) return 0;
+    auto [cp, len] = get_char_at(s, 0);
+    return cp;
+}
+
+// 1BRC: Get codepoint count without full conversion
+static inline size_t get_codepoint_count(const std::string& s) {
+    size_t count = 0;
+    size_t i = 0;
+    while (i < s.length()) {
+        auto [cp, len] = get_char_at(s, i);
+        if (len == 0) { i++; continue; }
+        count++;
+        i += len;
+    }
+    return count;
+}
+
+// 1BRC: Get codepoint at specific index (0-based)
+static inline char32_t get_codepoint_at(const std::string& s, size_t idx) {
+    size_t count = 0;
+    size_t i = 0;
+    while (i < s.length()) {
+        auto [cp, len] = get_char_at(s, i);
+        if (len == 0) { i++; continue; }
+        if (count == idx) return cp;
+        count++;
+        i += len;
+    }
+    return 0;
 }
 
 // Remove Zero-Width Space from string
@@ -58,9 +137,8 @@ std::vector<std::string> KhmerSegmenter::segment(std::string_view text) const {
         return {};
     }
 
-    // Convert to codepoints (thread-local allocation)
-    std::vector<char32_t> cps_buffer;
-    cps_buffer.reserve(text_to_process.size());
+    // 1BRC: Use thread-local codepoint buffer
+    auto& cps_buffer = tl_buffers.codepoints;
     utf8_to_codepoints(text_to_process, cps_buffer);
 
     if (cps_buffer.empty()) {
@@ -79,9 +157,15 @@ std::vector<std::string> KhmerSegmenter::segment(std::string_view text) const {
 }
 
 std::vector<std::string> KhmerSegmenter::segment_codepoints(const char32_t* cps, size_t n) const {
-    // Thread-local DP buffers for thread-safety
-    std::vector<float> dp_cost(n + 1, std::numeric_limits<float>::infinity());
-    std::vector<int32_t> dp_parent(n + 1, -1);
+    // 1BRC: Use thread-local DP buffers
+    auto& dp_cost = tl_buffers.dp_cost;
+    auto& dp_parent = tl_buffers.dp_parent;
+
+    // Resize and reset (reuses allocated memory)
+    dp_cost.resize(n + 1);
+    dp_parent.resize(n + 1);
+    std::fill(dp_cost.begin(), dp_cost.end(), std::numeric_limits<float>::infinity());
+    std::fill(dp_parent.begin(), dp_parent.end(), -1);
     dp_cost[0] = 0.0f;
 
     // Cache frequently used values
@@ -200,9 +284,10 @@ std::vector<std::string> KhmerSegmenter::segment_codepoints(const char32_t* cps,
         }
     }
 
-    // Backtrack - build segments in reverse
+    // Backtrack - build segments in reverse using thread-local buffer
     std::vector<std::string> segments;
     segments.reserve(n / 4);
+    auto& utf8_buf = tl_buffers.utf8_buffer;
     int32_t curr = static_cast<int32_t>(n);
     while (curr > 0) {
         int32_t prev = dp_parent[curr];
@@ -210,7 +295,9 @@ std::vector<std::string> KhmerSegmenter::segment_codepoints(const char32_t* cps,
             std::cerr << "Error: Could not segment text. Stuck at index " << curr << std::endl;
             break;
         }
-        segments.push_back(codepoints_to_string(cps, prev, curr));
+        // 1BRC: Use fast direct encoding
+        codepoints_to_utf8_fast(cps, prev, curr, utf8_buf);
+        segments.push_back(utf8_buf);
         curr = prev;
     }
 
@@ -220,9 +307,29 @@ std::vector<std::string> KhmerSegmenter::segment_codepoints(const char32_t* cps,
     return segments;
 }
 
+// 1BRC: Optimized codepoints_to_string using fast encoding
 std::string KhmerSegmenter::codepoints_to_string(const char32_t* cps, size_t start, size_t end) const {
-    std::u32string u32(cps + start, cps + end);
-    return to_utf8(u32);
+    std::string result;
+    result.reserve((end - start) * 3);
+    for (size_t i = start; i < end; ++i) {
+        char32_t c = cps[i];
+        if (c <= 0x7F) {
+            result.push_back(static_cast<char>(c));
+        } else if (c <= 0x7FF) {
+            result.push_back(static_cast<char>(0xC0 | ((c >> 6) & 0x1F)));
+            result.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        } else if (c <= 0xFFFF) {
+            result.push_back(static_cast<char>(0xE0 | ((c >> 12) & 0x0F)));
+            result.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        } else {
+            result.push_back(static_cast<char>(0xF0 | ((c >> 18) & 0x07)));
+            result.push_back(static_cast<char>(0x80 | ((c >> 12) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        }
+    }
+    return result;
 }
 
 std::vector<std::string> KhmerSegmenter::snap_invalid_single_consonants(std::vector<std::string>&& segments) const {
@@ -231,12 +338,11 @@ std::vector<std::string> KhmerSegmenter::snap_invalid_single_consonants(std::vec
 
     for (size_t j = 0; j < segments.size(); ++j) {
         const std::string& seg = segments[j];
-        std::u32string u32 = to_u32(seg);
+        // 1BRC: Use fast helpers instead of full u32string conversion
+        char32_t first_cp = get_first_codepoint(seg);
+        if (first_cp == 0) continue;
 
-        if (u32.empty()) continue;
-
-        char32_t first_cp = u32[0];
-        size_t seg_len = u32.length();
+        size_t seg_len = get_codepoint_count(seg);
 
         bool is_invalid_single = seg_len == 1
             && !is_valid_single_word(first_cp)
@@ -247,8 +353,8 @@ std::vector<std::string> KhmerSegmenter::snap_invalid_single_consonants(std::vec
         if (is_invalid_single) {
             bool prev_is_sep = false;
             if (!result.empty()) {
-                std::u32string prev_u32 = to_u32(result.back());
-                if (!prev_u32.empty() && (is_separator(prev_u32[0]) || result.back() == " ")) {
+                char32_t prev_first = get_first_codepoint(result.back());
+                if (is_separator(prev_first) || result.back() == " ") {
                     prev_is_sep = true;
                 }
             } else if (j == 0) {
@@ -257,8 +363,8 @@ std::vector<std::string> KhmerSegmenter::snap_invalid_single_consonants(std::vec
 
             bool next_is_sep = false;
             if (j + 1 < segments.size()) {
-                std::u32string next_u32 = to_u32(segments[j + 1]);
-                if (!next_u32.empty() && (is_separator(next_u32[0]) || segments[j + 1] == " ")) {
+                char32_t next_first = get_first_codepoint(segments[j + 1]);
+                if (is_separator(next_first) || segments[j + 1] == " ") {
                     next_is_sep = true;
                 }
             } else {
@@ -271,8 +377,8 @@ std::vector<std::string> KhmerSegmenter::snap_invalid_single_consonants(std::vec
             }
 
             if (!result.empty()) {
-                std::u32string prev_u32 = to_u32(result.back());
-                if (!prev_u32.empty() && !is_separator(prev_u32[0])) {
+                char32_t prev_first = get_first_codepoint(result.back());
+                if (!is_separator(prev_first)) {
                     result.back() += seg;
                 } else {
                     result.push_back(std::move(segments[j]));
@@ -305,20 +411,26 @@ std::vector<std::string> KhmerSegmenter::apply_heuristics(std::vector<std::strin
             continue;
         }
 
-        std::u32string chars = to_u32(curr);
+        // 1BRC: Use fast helpers instead of full u32string conversion
+        size_t char_count = get_codepoint_count(curr);
 
         // Rule 1: Consonant + [់/ិ៍/៍/៌] -> Merge with PREVIOUS
         bool merged_rule1 = false;
         if (!merged.empty()) {
-            if (chars.size() == 2) {
-                if (is_consonant(chars[0]) &&
-                    (chars[1] == 0x17CB || chars[1] == 0x17CE || chars[1] == 0x17CF)) {
+            if (char_count == 2) {
+                char32_t c0 = get_first_codepoint(curr);
+                char32_t c1 = get_codepoint_at(curr, 1);
+                if (is_consonant(c0) &&
+                    (c1 == 0x17CB || c1 == 0x17CE || c1 == 0x17CF)) {
                     merged.back() += curr;
                     i++;
                     merged_rule1 = true;
                 }
-            } else if (chars.size() == 3) {
-                if (is_consonant(chars[0]) && chars[1] == 0x17B7 && chars[2] == 0x17CD) {
+            } else if (char_count == 3) {
+                char32_t c0 = get_first_codepoint(curr);
+                char32_t c1 = get_codepoint_at(curr, 1);
+                char32_t c2 = get_codepoint_at(curr, 2);
+                if (is_consonant(c0) && c1 == 0x17B7 && c2 == 0x17CD) {
                     merged.back() += curr;
                     i++;
                     merged_rule1 = true;
@@ -329,8 +441,10 @@ std::vector<std::string> KhmerSegmenter::apply_heuristics(std::vector<std::strin
 
         // Rule 2: Consonant + ័ (\u17D0) -> Merge with NEXT
         if (i + 1 < n) {
-            if (chars.size() == 2) {
-                if (is_consonant(chars[0]) && chars[1] == 0x17D0) {
+            if (char_count == 2) {
+                char32_t c0 = get_first_codepoint(curr);
+                char32_t c1 = get_codepoint_at(curr, 1);
+                if (is_consonant(c0) && c1 == 0x17D0) {
                     std::string new_word = curr + segments[i + 1];
                     merged.push_back(std::move(new_word));
                     i += 2;
@@ -352,11 +466,11 @@ std::vector<std::string> KhmerSegmenter::post_process_unknowns(std::vector<std::
     std::string unknown_buffer;
 
     for (auto& seg : segments) {
-        std::u32string u32 = to_u32(seg);
-        if (u32.empty()) continue;
+        // 1BRC: Use fast helpers instead of full u32string conversion
+        char32_t first_char = get_first_codepoint(seg);
+        if (first_char == 0) continue;
 
-        char32_t first_char = u32[0];
-        size_t char_count = u32.length();
+        size_t char_count = get_codepoint_count(seg);
 
         bool is_known = false;
         if (is_digit(first_char)) {
