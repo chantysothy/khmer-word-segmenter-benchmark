@@ -289,6 +289,19 @@ public class Dictionary {
     }
 
     /**
+     * 1BRC: Lookup chars directly in trie. Returns cost if found, -1 otherwise.
+     * Since Khmer is entirely in BMP, char can be used directly as codepoint.
+     */
+    public float lookupChars(char[] chars, int start, int end) {
+        TrieNode node = trie;
+        for (int i = start; i < end; i++) {
+            node = node.getChild(chars[i]);
+            if (node == null) return -1f;
+        }
+        return node.isWord ? node.cost : -1f;
+    }
+
+    /**
      * Simple JSON parser for Map<String, Number> format.
      */
     private Map<String, Double> parseJsonMap(String json) {

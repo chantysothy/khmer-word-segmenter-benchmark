@@ -162,52 +162,117 @@ public class Main {
     }
 
     // ============================================================================
-    // High-performance JSON building inspired by 1BRC optimizations
+    // 1BRC: High-performance JSON building with char[] buffer
     // ============================================================================
 
-    // ThreadLocal StringBuilder to avoid allocation overhead in hot path
-    private static final ThreadLocal<StringBuilder> JSON_BUFFER = ThreadLocal.withInitial(() -> new StringBuilder(512));
+    // 1BRC: ThreadLocal char buffer instead of StringBuilder for faster hot path
+    private static final ThreadLocal<char[]> JSON_BUFFER = ThreadLocal.withInitial(() -> new char[8192]);
 
     private static String toJson(int id, String input, List<String> segments) {
-        StringBuilder sb = JSON_BUFFER.get();
-        sb.setLength(0); // Clear without reallocating
+        char[] buffer = JSON_BUFFER.get();
+        int pos = 0;
 
-        sb.append("{\"id\":").append(id);
-        sb.append(",\"input\":\"");
-        escapeJsonTo(sb, input);
-        sb.append("\",\"segments\":[");
-        for (int j = 0; j < segments.size(); j++) {
-            if (j > 0) sb.append(',');
-            sb.append('"');
-            escapeJsonTo(sb, segments.get(j));
-            sb.append('"');
+        // Estimate size needed (worst case: all chars escaped as unicode)
+        int estimatedSize = 32 + input.length() * 6 + segments.size() * 10;
+        for (int i = 0; i < segments.size(); i++) {
+            estimatedSize += segments.get(i).length() * 6;
         }
-        sb.append("]}");
-        return sb.toString();
+        if (buffer.length < estimatedSize) {
+            buffer = new char[estimatedSize * 2];
+            JSON_BUFFER.set(buffer);
+        }
+
+        // Build: {"id":N,"input":"...","segments":["...", ...]}
+        pos = writeString(buffer, pos, "{\"id\":");
+        pos = writeInt(buffer, pos, id);
+        pos = writeString(buffer, pos, ",\"input\":\"");
+        pos = escapeJson(buffer, pos, input);
+        pos = writeString(buffer, pos, "\",\"segments\":[");
+
+        for (int j = 0; j < segments.size(); j++) {
+            if (j > 0) buffer[pos++] = ',';
+            buffer[pos++] = '"';
+            pos = escapeJson(buffer, pos, segments.get(j));
+            buffer[pos++] = '"';
+        }
+
+        pos = writeString(buffer, pos, "]}");
+        return new String(buffer, 0, pos);
     }
 
-    // Escape JSON directly into StringBuilder - no intermediate String allocation
-    private static void escapeJsonTo(StringBuilder sb, String s) {
+    // 1BRC: Direct char copy, faster than StringBuilder.append
+    private static int writeString(char[] buffer, int pos, String s) {
+        s.getChars(0, s.length(), buffer, pos);
+        return pos + s.length();
+    }
+
+    // 1BRC: Fast integer to char conversion
+    private static int writeInt(char[] buffer, int pos, int value) {
+        if (value == 0) {
+            buffer[pos++] = '0';
+            return pos;
+        }
+        if (value < 10) {
+            buffer[pos++] = (char) ('0' + value);
+            return pos;
+        }
+        // Write digits in reverse, then reverse
+        int start = pos;
+        while (value > 0) {
+            buffer[pos++] = (char) ('0' + value % 10);
+            value /= 10;
+        }
+        // Reverse the digits
+        int end = pos - 1;
+        while (start < end) {
+            char temp = buffer[start];
+            buffer[start] = buffer[end];
+            buffer[end] = temp;
+            start++;
+            end--;
+        }
+        return pos;
+    }
+
+    // 1BRC: Escape JSON directly into char buffer
+    private static int escapeJson(char[] buffer, int pos, String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
             switch (c) {
-                case '"': sb.append("\\\""); break;
-                case '\\': sb.append("\\\\"); break;
-                case '\n': sb.append("\\n"); break;
-                case '\r': sb.append("\\r"); break;
-                case '\t': sb.append("\\t"); break;
+                case '"':
+                    buffer[pos++] = '\\';
+                    buffer[pos++] = '"';
+                    break;
+                case '\\':
+                    buffer[pos++] = '\\';
+                    buffer[pos++] = '\\';
+                    break;
+                case '\n':
+                    buffer[pos++] = '\\';
+                    buffer[pos++] = 'n';
+                    break;
+                case '\r':
+                    buffer[pos++] = '\\';
+                    buffer[pos++] = 'r';
+                    break;
+                case '\t':
+                    buffer[pos++] = '\\';
+                    buffer[pos++] = 't';
+                    break;
                 default:
                     if (c < 32) {
-                        sb.append("\\u");
-                        sb.append(HEX_DIGITS[(c >> 12) & 0xF]);
-                        sb.append(HEX_DIGITS[(c >> 8) & 0xF]);
-                        sb.append(HEX_DIGITS[(c >> 4) & 0xF]);
-                        sb.append(HEX_DIGITS[c & 0xF]);
+                        buffer[pos++] = '\\';
+                        buffer[pos++] = 'u';
+                        buffer[pos++] = '0';
+                        buffer[pos++] = '0';
+                        buffer[pos++] = HEX_DIGITS[(c >> 4) & 0xF];
+                        buffer[pos++] = HEX_DIGITS[c & 0xF];
                     } else {
-                        sb.append(c);
+                        buffer[pos++] = c;
                     }
             }
         }
+        return pos;
     }
 
     // Pre-computed hex digits for fast formatting (avoids String.format overhead)
