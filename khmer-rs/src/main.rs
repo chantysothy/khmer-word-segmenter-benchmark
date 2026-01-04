@@ -1,10 +1,10 @@
 use clap::Parser;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use std::time::Instant;
 use rayon::prelude::*;
-use serde::Serialize;
+use std::cell::RefCell;
 
 use khmer_rs::dictionary::Dictionary;
 use khmer_rs::segmenter::KhmerSegmenter;
@@ -33,11 +33,86 @@ struct Args {
     limit: Option<usize>,
 }
 
-#[derive(Serialize)]
-struct OutputRecord<'a> {
-    id: usize,
-    input: &'a str,
-    segments: Vec<String>,
+// ============================================================================
+// 1BRC Optimization: Fast JSON builder with thread-local buffers
+// Avoids serde_json overhead and allocation per record
+// ============================================================================
+
+/// Pre-computed hex digits table (avoids snprintf overhead)
+const HEX_DIGITS: &[u8] = b"0123456789abcdef";
+
+thread_local! {
+    static JSON_BUFFER: RefCell<String> = RefCell::new(String::with_capacity(1024));
+}
+
+/// Fast JSON string escaper - appends directly to buffer
+#[inline]
+fn escape_json_to(out: &mut String, s: &str) {
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                // Fast hex encoding using lookup table
+                let code = c as u8;
+                out.push_str("\\u00");
+                out.push(HEX_DIGITS[(code >> 4) as usize] as char);
+                out.push(HEX_DIGITS[(code & 0xF) as usize] as char);
+            }
+            c => out.push(c),
+        }
+    }
+}
+
+/// Fast integer to string - appends directly to buffer
+#[inline]
+fn append_int(out: &mut String, val: usize) {
+    if val == 0 {
+        out.push('0');
+        return;
+    }
+    let mut buf = [0u8; 20];
+    let mut i = 20;
+    let mut v = val;
+    while v > 0 {
+        i -= 1;
+        buf[i] = b'0' + (v % 10) as u8;
+        v /= 10;
+    }
+    for j in i..20 {
+        out.push(buf[j] as char);
+    }
+}
+
+/// Build JSON record directly using thread-local buffer
+#[inline]
+fn build_json_record(id: usize, input: &str, segments: &[String]) -> String {
+    JSON_BUFFER.with(|buf| {
+        let mut buffer = buf.borrow_mut();
+        buffer.clear();
+
+        // Build: {"id":N,"input":"...","segments":["...", ...]}
+        buffer.push_str("{\"id\":");
+        append_int(&mut buffer, id);
+        buffer.push_str(",\"input\":\"");
+        escape_json_to(&mut buffer, input);
+        buffer.push_str("\",\"segments\":[");
+
+        for (i, seg) in segments.iter().enumerate() {
+            if i > 0 {
+                buffer.push(',');
+            }
+            buffer.push('"');
+            escape_json_to(&mut buffer, seg);
+            buffer.push('"');
+        }
+
+        buffer.push_str("]}");
+        buffer.clone()
+    })
 }
 
 fn main() -> anyhow::Result<()> {
@@ -73,28 +148,25 @@ fn main() -> anyhow::Result<()> {
     println!("Processing {} lines...", lines.len());
     let start_process = Instant::now();
 
-    // Parallel processing using Rayon
-    // We collect results into a Vec first to ensure order is preserved and to keep IO out of the parallel section
+    // Parallel processing using Rayon with 1BRC fast JSON builder
     let results: Vec<String> = lines.par_iter()
         .enumerate()
         .map(|(i, line)| {
             let segments = segmenter.segment(line);
-
-            let record = OutputRecord {
-                id: i,
-                input: line,
-                segments,
-            };
-            serde_json::to_string(&record).unwrap_or_default()
+            // 1BRC: Use fast inline JSON builder instead of serde_json
+            build_json_record(i, line, &segments)
         })
         .collect();
 
     // Write results to file only if output is specified
     if let Some(ref output_path) = args.output {
-        let mut output_file = File::create(output_path)?;
-        for result in results {
-            writeln!(output_file, "{}", result)?;
+        let output_file = File::create(output_path)?;
+        // 1BRC: Use buffered writer with large buffer for better I/O
+        let mut writer = BufWriter::with_capacity(262144, output_file);
+        for result in &results {
+            writeln!(writer, "{}", result)?;
         }
+        writer.flush()?;
     }
 
     let duration = start_process.elapsed();
