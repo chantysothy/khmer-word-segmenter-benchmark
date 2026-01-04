@@ -168,10 +168,22 @@ int main(int argc, char* argv[]) {
         std::string line;
         while (std::getline(infile, line)) {
             if (!line.empty()) {
-                // remove potential carriage return
-                if (line.back() == '\r') line.pop_back();
-                lines.push_back(line);
-                if (args.limit > 0 && lines.size() >= static_cast<size_t>(args.limit)) break;
+                // Trim trailing whitespace (CR, spaces) for consistency with Python
+                while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
+                    line.pop_back();
+                }
+                // Trim leading whitespace
+                size_t start = 0;
+                while (start < line.size() && (line[start] == ' ' || line[start] == '\t')) {
+                    ++start;
+                }
+                if (start > 0) {
+                    line = line.substr(start);
+                }
+                if (!line.empty()) {
+                    lines.push_back(line);
+                    if (args.limit > 0 && lines.size() >= static_cast<size_t>(args.limit)) break;
+                }
             }
         }
     }
