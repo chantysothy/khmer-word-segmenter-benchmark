@@ -13,35 +13,35 @@ This project takes the original Python implementation of a probabilistic Khmer w
 
 ## Benchmark Results
 
-Tested on the same hardware with 60,771 lines of Khmer Wikipedia corpus:
+Tested on the same hardware with 10,000 lines of Khmer Wikipedia corpus:
 
 | Language | Speed (lines/sec) | Speedup vs Python | Output Match | Key Optimizations |
 |----------|-------------------|-------------------|--------------|-------------------|
-| **Go** | **179,188** | **236x** | ✅ 100% | Trie + 32 goroutines + sync.Pool |
-| **C# (.NET)** | 87,330 | 139x | ✅ 100% | Trie + lookup tables + fast JSON |
-| **Rust** | 79,688 | 126x | ✅ 100% | Trie + FxHashMap + Rayon parallelism |
-| **Java** | 46,284 | 73x | ✅ 100% | Trie + parallel streams + flat arrays |
-| **C++** | 25,447 | 40x | ✅ 100% | Trie + 1BRC optimizations + single-threaded |
-| **Node.js** | 9,781 | 16x | ✅ 100% | Trie + worker threads + charCode optimization |
-| **Bun** | 9,558 | 15x | ✅ 100% | Trie + Web Workers + TypedArray buffers |
-| **WASM** | 8,651 | 14x | ✅ 100% | AssemblyScript + worker threads + bit flag tables |
-| **Python** | 630 | 1x | Baseline | Reference implementation |
+| **Go** | **207,547** | **327x** | ✅ 100% | Trie + 32 goroutines + sync.Pool + 1BRC |
+| **C++** | 176,020 | 277x | ✅ 100% | Trie + 1BRC lookup tables + fast JSON |
+| **Rust** | 104,791 | 165x | ✅ 100% | Trie + FxHashMap + Rayon + 1BRC thread-local |
+| **C# (.NET)** | 86,932 | 137x | ✅ 100% | Trie + lookup tables + fast JSON |
+| **Java** | 23,256 | 37x | ✅ 100% | Trie + parallel streams + 1BRC optimizations |
+| **Node.js** | 9,785 | 15x | ✅ 100% | Trie + worker threads + charCode optimization |
+| **Bun** | 9,203 | 14x | ✅ 100% | Trie + Web Workers + TypedArray buffers |
+| **WASM** | 8,426 | 13x | ✅ 100% | AssemblyScript + worker threads + bit flags |
+| **Python** | 635 | 1x | Baseline | Reference implementation |
 
-> **Note**: "Output Match" indicates segmentation accuracy compared to Python baseline on 60,771 test lines.
+> **Note**: "Output Match" indicates segmentation accuracy compared to Python baseline.
 > All optimized implementations achieve **100% identical output** to the Python reference implementation.
 
 ### Performance Visualization
 
 ```
-Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 179,188
-C#       ████████████████████████████████████████████████████████████████████████████████████████████ 87,330
-Rust     ████████████████████████████████████████████████████████████████████████████████ 79,688
-Java     ████████████████████████████████████████████████ 46,284
-C++      ██████████████████████████ 25,447
-Node.js  ██████████ 9,781
-Bun      ██████████ 9,558
-WASM     █████████ 8,651
-Python   █ 630
+Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 207,547
+C++      ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 176,020
+Rust     ████████████████████████████████████████████████████████████████████████████████████████████████████ 104,791
+C#       ████████████████████████████████████████████████████████████████████████████████████ 86,932
+Java     ███████████████████████ 23,256
+Node.js  █████████ 9,785
+Bun      █████████ 9,203
+WASM     ████████ 8,426
+Python   █ 635
          └────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
 ```
 
