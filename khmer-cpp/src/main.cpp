@@ -23,6 +23,28 @@
     #define FORCE_INLINE inline
 #endif
 
+// Pre-computed hex digits table (avoids snprintf overhead)
+static constexpr char HEX_DIGITS[] = "0123456789abcdef";
+
+// Fast integer to string - appends directly to buffer (avoids std::to_string allocation)
+FORCE_INLINE void append_int(std::string& out, int64_t val) {
+    if (val == 0) {
+        out += '0';
+        return;
+    }
+    if (val < 0) {
+        out += '-';
+        val = -val;
+    }
+    char buf[20];
+    char* p = buf + 20;
+    while (val > 0) {
+        *--p = '0' + (val % 10);
+        val /= 10;
+    }
+    out.append(p, buf + 20 - p);
+}
+
 // Fast inline JSON string escaper - appends directly to buffer
 FORCE_INLINE void escape_json_to(std::string& out, const std::string& s) {
     for (unsigned char c : s) {
@@ -34,9 +56,10 @@ FORCE_INLINE void escape_json_to(std::string& out, const std::string& s) {
             case '\t': out += "\\t"; break;
             default:
                 if (c < 0x20) {
-                    char buf[7];
-                    snprintf(buf, sizeof(buf), "\\u%04x", c);
-                    out += buf;
+                    // Fast hex encoding using lookup table instead of snprintf
+                    out += "\\u00";
+                    out += HEX_DIGITS[(c >> 4) & 0xF];
+                    out += HEX_DIGITS[c & 0xF];
                 } else {
                     out += c;
                 }
@@ -57,7 +80,7 @@ FORCE_INLINE std::string build_json_record(
 
     // Build: {"id":N,"input":"...","segments":["...", ...]}
     buffer += "{\"id\":";
-    buffer += std::to_string(id);
+    append_int(buffer, id);
     buffer += ",\"input\":\"";
     escape_json_to(buffer, input);
     buffer += "\",\"segments\":[";
