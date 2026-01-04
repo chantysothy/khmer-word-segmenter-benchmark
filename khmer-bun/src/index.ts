@@ -188,7 +188,8 @@ async function main() {
   // Load input
   const inputFile = Bun.file(args.input);
   const inputContent = await inputFile.text();
-  let lines = inputContent.split(/\r?\n/).filter(line => line.trim().length > 0);
+  // Trim lines to match Python's line.strip() behavior
+  let lines = inputContent.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
 
   if (args.limit && args.limit > 0) {
     lines = lines.slice(0, args.limit);

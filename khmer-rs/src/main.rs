@@ -55,10 +55,14 @@ fn main() -> anyhow::Result<()> {
     println!("Reading source: {}", args.input);
     let file = File::open(&args.input)?;
     let reader = BufReader::new(file);
-    let mut lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
-
-    // Filter empty lines
-    lines.retain(|l| !l.trim().is_empty());
+    // Read and trim lines - must match Python's line.strip() behavior
+    let mut lines: Vec<String> = reader
+        .lines()
+        .collect::<Result<Vec<String>, _>>()?
+        .into_iter()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
 
     if let Some(limit) = args.limit {
         if limit < lines.len() {

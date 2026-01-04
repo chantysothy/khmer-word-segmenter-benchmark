@@ -262,7 +262,8 @@ async function main() {
 
   // Load input
   const inputContent = fs.readFileSync(inputPath, 'utf-8');
-  const lines = inputContent.split(/\r?\n/).filter(line => line.trim().length > 0);
+  // Trim lines to match Python's line.strip() behavior
+  const lines = inputContent.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
 
   console.log(`Processing ${lines.length} lines...`);
   const startProc = performance.now();

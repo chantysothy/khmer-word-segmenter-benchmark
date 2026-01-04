@@ -13,33 +13,36 @@ This project takes the original Python implementation of a probabilistic Khmer w
 
 ## Benchmark Results
 
-Tested on the same hardware with 10,000 lines of Khmer text:
+Tested on the same hardware with 60,771 lines of Khmer Wikipedia corpus:
 
-| Language | Speed (lines/sec) | Speedup vs Python | Key Optimizations |
-|----------|-------------------|-------------------|-------------------|
-| **C++** | **300,000** | **478x** | Trie + 1BRC optimizations + OpenMP |
-| **Go** | 164,306 | 262x | Trie + 32 goroutines + sync.Pool |
-| **Rust** | 84,160 | 134x | Trie + FxHashMap + Rayon parallelism |
-| **C# (.NET)** | 80,093 | 128x | Trie + lookup tables + fast JSON + Parallel.For |
-| **Java** | 21,739 | 35x | Trie + parallel streams + flat arrays |
-| **Node.js** | 9,307 | 15x | Trie + worker threads + charCode optimization |
-| **Bun** | 9,327 | 15x | Trie + Web Workers + TypedArray buffers |
-| **WASM** | 8,708 | 14x | AssemblyScript + worker threads + bit flag tables |
-| **Python** | 627 | 1x | Original reference implementation |
+| Language | Speed (lines/sec) | Speedup vs Python | Output Match | Key Optimizations |
+|----------|-------------------|-------------------|--------------|-------------------|
+| **Go** | **168,983** | **221x** | 99.96% | Trie + 32 goroutines + sync.Pool |
+| **C# (.NET)** | 111,269 | 146x | ✅ 100% | Trie + lookup tables + fast JSON |
+| **Rust** | 92,974 | 122x | ✅ 100% | Trie + FxHashMap + Rayon parallelism |
+| **Java** | 39,928 | 52x | 99.96% | Trie + parallel streams + flat arrays |
+| **C++** | 22,043 | 29x | ✅ 100% | Trie + 1BRC optimizations + single-threaded |
+| **Node.js** | 21,615 | 28x | 99.99% | Trie + worker threads + charCode optimization |
+| **WASM** | 16,398 | 21x | 99.58% | AssemblyScript + worker threads + bit flag tables |
+| **Bun** | 16,186 | 21x | 99.97% | Trie + Web Workers + TypedArray buffers |
+| **Python** | 764 | 1x | Baseline | Reference implementation |
+
+> **Note**: "Output Match" indicates segmentation accuracy compared to Python baseline on 60,771 test lines.
+> C#, Rust, and C++ achieve **100% identical output** to the Python reference implementation.
 
 ### Performance Visualization
 
 ```
-C++      ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 300,000
-Go       ███████████████████████████████████████████████████████████████████████████████████████████████████████████████ 164,306
-Rust     █████████████████████████████████████████████████████████ 84,160
-C#       █████████████████████████████████████████████████████ 80,093
-Java     ██████████████ 21,739
-Node.js  ██████ 9,307
-Bun      ██████ 9,327
-WASM     ██████ 8,708
-Python   █ 627
-         └──────────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
+Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 168,983
+C#       ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 111,269
+Rust     ████████████████████████████████████████████████████████████████████████████████████████████████ 92,974
+Java     ████████████████████████████████████████ 39,928
+C++      ██████████████████████ 22,043
+Node.js  █████████████████████ 21,615
+WASM     ████████████████ 16,398
+Bun      ████████████████ 16,186
+Python   █ 764
+         └────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
 ```
 
 ## Language Implementations
