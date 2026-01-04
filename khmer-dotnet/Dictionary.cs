@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 
 namespace KhmerSegmenter
 {
@@ -117,7 +117,8 @@ namespace KhmerSegmenter
                 try
                 {
                     var jsonString = File.ReadAllText(freqPath);
-                    rawFreqs = JsonSerializer.Deserialize<Dictionary<string, double>>(jsonString) ?? new Dictionary<string, double>();
+                    // 1BRC: Use manual JSON parsing for AOT compatibility
+                    rawFreqs = ParseFrequencyJson(jsonString);
                 }
                 catch (Exception e)
                 {
@@ -204,6 +205,13 @@ namespace KhmerSegmenter
             return _trie.TryLookupRange(chars, start, end, out cost);
         }
 
+        // 1BRC: Span-based overload for zero-allocation lookups
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryGetCost(ReadOnlySpan<char> chars, int start, int end, out float cost)
+        {
+            return _trie.TryLookupSpan(chars, start, end, out cost);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float GetWordCost(string word)
         {
@@ -288,6 +296,71 @@ namespace KhmerSegmenter
             }
 
             return variants;
+        }
+
+        /// <summary>
+        /// 1BRC: Manual JSON parser for AOT compatibility.
+        /// Parses a simple {string: number} dictionary format.
+        /// </summary>
+        private static Dictionary<string, double> ParseFrequencyJson(string json)
+        {
+            var result = new Dictionary<string, double>();
+
+            // Skip leading whitespace and opening brace
+            int i = 0;
+            int len = json.Length;
+
+            while (i < len && (char.IsWhiteSpace(json[i]) || json[i] == '{')) i++;
+
+            while (i < len)
+            {
+                // Skip whitespace
+                while (i < len && char.IsWhiteSpace(json[i])) i++;
+
+                if (i >= len || json[i] == '}') break;
+
+                // Parse key (quoted string)
+                if (json[i] != '"') { i++; continue; }
+                i++; // skip opening quote
+
+                int keyStart = i;
+                while (i < len && json[i] != '"')
+                {
+                    if (json[i] == '\\') i++; // skip escaped char
+                    i++;
+                }
+                string key = json.Substring(keyStart, i - keyStart);
+                i++; // skip closing quote
+
+                // Skip to colon
+                while (i < len && json[i] != ':') i++;
+                i++; // skip colon
+
+                // Skip whitespace
+                while (i < len && char.IsWhiteSpace(json[i])) i++;
+
+                // Parse number value
+                int valueStart = i;
+                while (i < len && (char.IsDigit(json[i]) || json[i] == '.' || json[i] == '-' || json[i] == 'e' || json[i] == 'E' || json[i] == '+'))
+                {
+                    i++;
+                }
+
+                if (i > valueStart)
+                {
+                    string valueStr = json.Substring(valueStart, i - valueStart);
+                    if (double.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
+                    {
+                        result[key] = value;
+                    }
+                }
+
+                // Skip to next entry (comma or end)
+                while (i < len && json[i] != ',' && json[i] != '}') i++;
+                if (i < len && json[i] == ',') i++;
+            }
+
+            return result;
         }
     }
 }

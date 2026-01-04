@@ -128,6 +128,27 @@ namespace KhmerSegmenter
         }
 
         /// <summary>
+        /// 1BRC: Span-based lookup for zero-allocation dictionary lookups.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryLookupSpan(ReadOnlySpan<char> chars, int start, int end, out float cost)
+        {
+            cost = 0;
+            var node = _root;
+            for (int i = start; i < end; i++)
+            {
+                node = node.GetChild(chars[i]);
+                if (node == null) return false;
+            }
+            if (node.IsWord)
+            {
+                cost = node.Cost;
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Check if a word exists in the trie.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

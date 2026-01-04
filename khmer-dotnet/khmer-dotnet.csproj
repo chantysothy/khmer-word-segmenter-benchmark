@@ -6,6 +6,26 @@
     <RootNamespace>khmer_dotnet</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- 1BRC: AOT-ready compilation settings -->
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Speed</OptimizationPreference>
+
+    <!-- 1BRC: Aggressive optimizations for Release -->
+    <TieredCompilation>false</TieredCompilation>
   </PropertyGroup>
+
+  <!-- 1BRC: Release-specific optimizations -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+  <!-- Exclude test project folder from compilation -->
+  <ItemGroup>
+    <Compile Remove="KhmerSegmenter.Tests\**" />
+    <None Remove="KhmerSegmenter.Tests\**" />
+  </ItemGroup>
 
 </Project>

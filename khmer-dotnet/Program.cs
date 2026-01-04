@@ -308,72 +308,148 @@ namespace KhmerSegmenter
 
     /// <summary>
     /// High-performance JSON builder avoiding System.Text.Json overhead.
-    /// Inspired by 1 Billion Row Challenge optimizations.
+    /// 1BRC: Uses char buffer with Span for zero-allocation hot path.
     /// </summary>
     internal static class FastJson
     {
         [ThreadStatic]
-        private static StringBuilder? _sb;
+        private static char[]? _buffer;
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private const int INITIAL_BUFFER_SIZE = 8192;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         public static string BuildRecord(int id, string input, List<string> segments)
         {
-            var sb = _sb ??= new StringBuilder(512);
-            sb.Clear();
+            // 1BRC: Use char buffer instead of StringBuilder
+            var buffer = _buffer ??= new char[INITIAL_BUFFER_SIZE];
+            int pos = 0;
 
-            sb.Append("{\"id\":");
-            sb.Append(id);
-            sb.Append(",\"input\":\"");
-            EscapeString(sb, input);
-            sb.Append("\",\"segments\":[");
+            // Ensure buffer is large enough (worst case: all chars escaped as \uXXXX)
+            int estimatedSize = 32 + input.Length * 6 + segments.Count * 10;
+            foreach (var seg in segments)
+            {
+                estimatedSize += seg.Length * 6;
+            }
+
+            if (buffer.Length < estimatedSize)
+            {
+                buffer = _buffer = new char[estimatedSize * 2];
+            }
+
+            // Build: {"id":N,"input":"...","segments":["...", ...]}
+            WriteString(buffer, ref pos, "{\"id\":");
+            WriteInt(buffer, ref pos, id);
+            WriteString(buffer, ref pos, ",\"input\":\"");
+            EscapeString(buffer, ref pos, input);
+            WriteString(buffer, ref pos, "\",\"segments\":[");
 
             for (int i = 0; i < segments.Count; i++)
             {
-                if (i > 0) sb.Append(',');
-                sb.Append('"');
-                EscapeString(sb, segments[i]);
-                sb.Append('"');
+                if (i > 0)
+                {
+                    buffer[pos++] = ',';
+                }
+                buffer[pos++] = '"';
+                EscapeString(buffer, ref pos, segments[i]);
+                buffer[pos++] = '"';
             }
 
-            sb.Append("]}");
-            return sb.ToString();
+            WriteString(buffer, ref pos, "]}");
+
+            return new string(buffer, 0, pos);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void EscapeString(StringBuilder sb, string s)
+        private static void WriteString(char[] buffer, ref int pos, string s)
+        {
+            s.AsSpan().CopyTo(buffer.AsSpan(pos));
+            pos += s.Length;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void WriteInt(char[] buffer, ref int pos, int value)
+        {
+            if (value == 0)
+            {
+                buffer[pos++] = '0';
+                return;
+            }
+
+            // Fast path for small numbers (most common case)
+            if (value < 10)
+            {
+                buffer[pos++] = (char)('0' + value);
+                return;
+            }
+
+            // Write digits in reverse, then reverse
+            int start = pos;
+            while (value > 0)
+            {
+                buffer[pos++] = (char)('0' + value % 10);
+                value /= 10;
+            }
+
+            // Reverse the digits
+            int end = pos - 1;
+            while (start < end)
+            {
+                (buffer[start], buffer[end]) = (buffer[end], buffer[start]);
+                start++;
+                end--;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void EscapeString(char[] buffer, ref int pos, string s)
         {
             foreach (char c in s)
             {
                 switch (c)
                 {
                     case '"':
-                        sb.Append("\\\"");
+                        buffer[pos++] = '\\';
+                        buffer[pos++] = '"';
                         break;
                     case '\\':
-                        sb.Append("\\\\");
+                        buffer[pos++] = '\\';
+                        buffer[pos++] = '\\';
                         break;
                     case '\n':
-                        sb.Append("\\n");
+                        buffer[pos++] = '\\';
+                        buffer[pos++] = 'n';
                         break;
                     case '\r':
-                        sb.Append("\\r");
+                        buffer[pos++] = '\\';
+                        buffer[pos++] = 'r';
                         break;
                     case '\t':
-                        sb.Append("\\t");
+                        buffer[pos++] = '\\';
+                        buffer[pos++] = 't';
                         break;
                     default:
                         if (c < 32)
                         {
-                            sb.Append("\\u");
-                            sb.Append(((int)c).ToString("x4"));
+                            buffer[pos++] = '\\';
+                            buffer[pos++] = 'u';
+                            buffer[pos++] = '0';
+                            buffer[pos++] = '0';
+                            buffer[pos++] = GetHexChar((c >> 4) & 0xF);
+                            buffer[pos++] = GetHexChar(c & 0xF);
                         }
                         else
                         {
-                            sb.Append(c);
+                            buffer[pos++] = c;
                         }
                         break;
                 }
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static char GetHexChar(int value)
+        {
+            return (char)(value < 10 ? '0' + value : 'a' + value - 10);
         }
     }
 }
