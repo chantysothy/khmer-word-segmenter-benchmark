@@ -13,19 +13,19 @@ This project takes the original Python implementation of a probabilistic Khmer w
 
 ## Benchmark Results
 
-Tested on the same hardware with 10,000 lines of Khmer Wikipedia corpus:
+Tested on the same hardware with 10,000 lines of Khmer text (synthetic workload):
 
 | Language | Speed (lines/sec) | Speedup vs Python | Output Match | Key Optimizations |
 |----------|-------------------|-------------------|--------------|-------------------|
-| **Go** | **214,320** | **346x** | ✅ 100% | Trie + 32 goroutines + sync.Pool + 1BRC |
-| **C++** | 167,966 | 271x | ✅ 100% | Trie + 1BRC lookup tables + fast JSON |
-| **Rust** | 113,779 | 184x | ✅ 100% | Trie + FxHashMap + Rayon + 1BRC thread-local |
-| **C# (.NET)** | 112,863 | 182x | ✅ 100% | Trie + Span<char> + SkipLocalsInit + 1BRC |
-| **Java** | 22,523 | 36x | ✅ 100% | Trie + parallel streams + 1BRC optimizations |
-| **Node.js** | 9,481 | 15x | ✅ 100% | Trie + worker threads + charCode optimization |
-| **Bun** | 9,442 | 15x | ✅ 100% | Trie + Web Workers + TypedArray buffers |
-| **WASM** | 8,651 | 14x | ✅ 100% | AssemblyScript + worker threads + bit flags |
-| **Python** | 620 | 1x | Baseline | Reference implementation |
+| **Go** | **210,172** | **334x** | ✅ 100% | Trie + 32 goroutines + sync.Pool + 1BRC |
+| **C++** | 184,063 | 293x | ✅ 100% | Trie + 1BRC lookup tables + fast JSON |
+| **Rust** | 115,307 | 183x | ✅ 100% | Trie + FxHashMap + Rayon + 1BRC thread-local |
+| **C# (.NET)** | 110,708 | 176x | ✅ 100% | Trie + Span<char> + SkipLocalsInit + 1BRC |
+| **Java** | 16,287 | 26x | ✅ 100% | Trie + parallel streams + char[] buffers + 1BRC |
+| **Node.js** | 9,590 | 15x | ✅ 100% | Trie + worker threads + charCode optimization |
+| **Bun** | 9,318 | 15x | ✅ 100% | Trie + Web Workers + TypedArray buffers |
+| **WASM** | 8,989 | 14x | ✅ 100% | AssemblyScript + worker threads + bit flags |
+| **Python** | 629 | 1x | Baseline | Reference implementation |
 
 > **Note**: "Output Match" indicates segmentation accuracy compared to Python baseline.
 > All optimized implementations achieve **100% identical output** to the Python reference implementation.
@@ -33,15 +33,15 @@ Tested on the same hardware with 10,000 lines of Khmer Wikipedia corpus:
 ### Performance Visualization
 
 ```
-Go       ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 214,320
-C++      █████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 167,966
-Rust     ███████████████████████████████████████████████████████████████████████████████████████████████████████████████ 113,779
-C#       ██████████████████████████████████████████████████████████████████████████████████████████████████████████████ 112,863
-Java     ██████████████████████ 22,523
-Node.js  █████████ 9,481
-Bun      █████████ 9,442
-WASM     ████████ 8,651
-Python   █ 620
+Go       ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 210,172
+C++      ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 184,063
+Rust     ██████████████████████████████████████████████████████████████████████████████████████████████████████████████ 115,307
+C#       █████████████████████████████████████████████████████████████████████████████████████████████████████████████ 110,708
+Java     ████████████████ 16,287
+Node.js  █████████ 9,590
+Bun      █████████ 9,318
+WASM     █████████ 8,989
+Python   █ 629
          └────────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
 ```
 
@@ -144,11 +144,11 @@ pip install -r requirements.txt
 python scripts/test_viterbi.py
 ```
 
-### Rust (Fastest)
+### Go (Fastest)
 ```bash
-cd khmer-rs
-cargo build --release
-./target/release/khmer-rs --input ../data/input.txt --output output.json
+cd khmer-go
+go build -o khmer.exe ./cmd/khmer
+./khmer.exe --input ../data/input.txt --output output.json
 ```
 
 ### C++ (High Performance)
@@ -160,11 +160,25 @@ cmake --build . --config Release
 ./Release/khmer_segmenter_cpp --input ../../data/input.txt --output output.json
 ```
 
+### Rust
+```bash
+cd khmer-rs
+cargo build --release
+./target/release/khmer-rs --input ../data/input.txt --output output.json
+```
+
 ### C# (.NET)
 ```bash
 cd khmer-dotnet
 dotnet build -c Release
 dotnet run -c Release -- --input ../data/input.txt --output output.json
+```
+
+### Java
+```bash
+cd khmer-java
+javac -encoding UTF-8 -d target/classes src/main/java/khmer/*.java
+java -cp target/classes khmer.Main --input ../data/input.txt --output output.json
 ```
 
 ### Node.js
@@ -266,17 +280,25 @@ Contributions welcome! Areas of interest:
 
 ## Original Work Credits
 
-This optimization benchmark is based on the original Khmer word segmentation algorithm. The original Python implementation uses:
+This optimization benchmark is a fork of the original **[Khmer Segmenter](https://github.com/Sovichea/khmer_segmenter)** by **[Sovichea Tep](https://github.com/Sovichea)**.
 
-- **Viterbi Algorithm** for optimal path finding
-- **Probabilistic cost model** based on word frequencies
-- **Linguistic heuristics** for Khmer-specific rules
+### About the Original Project
+
+The original implementation is a zero-dependency, high-performance Khmer word segmenter that focuses on **dictionary-accurate segmentation** rather than ML-based contextual inference. It was designed for portability across platforms from embedded systems to web applications.
+
+Key features of the original algorithm:
+
+- **Viterbi Algorithm**: A mathematical pathfinding approach that determines optimal word boundaries by computing the shortest path through possible text segments
+- **Probabilistic Cost Model**: Word costs derived from corpus frequencies using `-log10(probability)`
+- **Linguistic Heuristics**: Khmer-specific rules for handling numbers, currencies, acronyms, and unknown character clusters
+- **Normalization Logic**: Handles variant spellings (Coeng Ta/Da swap, Coeng Ro ordering) for robust matching
 
 ### Acknowledgements
 
-- **[khmernltk](https://github.com/VietHoang1512/khmer-nltk)**: Used for initial corpus tokenization
+- **[Sovichea Tep](https://github.com/Sovichea)**: Original algorithm design and Python implementation
+- **[Original khmer_segmenter Repository](https://github.com/Sovichea/khmer_segmenter)**: The source project this benchmark is based on
+- **[khmernltk](https://github.com/VietHoang1512/khmer-nltk)**: Used for initial corpus tokenization and baseline frequency generation
 - **[Khmer Folktales Corpus](https://github.com/sovichet)**: Dictionary and corpus resources
-- Original algorithm design by Sovichea Tep
 
 ## License
 
