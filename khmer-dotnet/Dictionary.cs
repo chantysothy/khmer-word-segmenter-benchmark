@@ -109,14 +109,15 @@ namespace KhmerSegmenter
                 allWords.Remove(w);
             }
 
-            // 4. Load Frequencies
-            var freqs = new Dictionary<string, double>();
+            // 4. Load Frequencies and generate variants with inherited frequencies
+            // This matches Python's _load_frequencies which generates variants and gives them same count
+            var rawFreqs = new Dictionary<string, double>();
             if (File.Exists(freqPath))
             {
                 try
                 {
                     var jsonString = File.ReadAllText(freqPath);
-                    freqs = JsonSerializer.Deserialize<Dictionary<string, double>>(jsonString) ?? new Dictionary<string, double>();
+                    rawFreqs = JsonSerializer.Deserialize<Dictionary<string, double>>(jsonString) ?? new Dictionary<string, double>();
                 }
                 catch (Exception e)
                 {
@@ -124,10 +125,37 @@ namespace KhmerSegmenter
                 }
             }
 
+            // Generate variants for frequency entries and inherit same frequency (matches Python)
+            // IMPORTANT: Process ALL original entries first, THEN add variants
+            // This ensures original frequency values take precedence over inherited variants
+            var freqs = new Dictionary<string, double>();
+
+            // First pass: Add all original entries from raw frequency file
+            foreach (var kvp in rawFreqs)
+            {
+                double eff = Math.Max(kvp.Value, DEFAULT_FREQ);
+                freqs[kvp.Key] = eff;
+            }
+
+            // Second pass: Generate variants and add those NOT already in freqs
+            foreach (var kvp in rawFreqs)
+            {
+                double eff = Math.Max(kvp.Value, DEFAULT_FREQ);
+                var variants = GenerateVariantsList(kvp.Key);
+                foreach (var v in variants)
+                {
+                    if (!freqs.ContainsKey(v))
+                    {
+                        freqs[v] = eff;
+                    }
+                }
+            }
+
             // 5. Calculate Costs - MUST match Python: only sum from frequency file entries
             // Python iterates over data.items() (frequency file), NOT dictionary words
+            // Note: total_tokens is calculated from RAW frequency file, not expanded variants
             double totalCount = 0;
-            foreach (var kvp in freqs)
+            foreach (var kvp in rawFreqs)
             {
                 totalCount += Math.Max(kvp.Value, DEFAULT_FREQ);
             }
@@ -146,8 +174,10 @@ namespace KhmerSegmenter
                 MaxWordLength = Math.Max(MaxWordLength, w.Length);
             }
 
-            // Calculate Unknown Cost
-            UnknownCost = (float)-Math.Log10(1.0 / totalCount) + 5.0f;
+            // Calculate Unknown Cost - Must match Python:
+            // Python: unknown_cost = -log10(min_freq_floor / total_tokens) + 5.0
+            // = -log10(DEFAULT_FREQ / totalCount) + 5.0
+            UnknownCost = (float)-Math.Log10(DEFAULT_FREQ / totalCount) + 5.0f;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -200,60 +230,64 @@ namespace KhmerSegmenter
         /// </summary>
         private static void GenerateVariants(string word, HashSet<string> allWords)
         {
+            foreach (var v in GenerateVariantsList(word))
+            {
+                allWords.Add(v);
+            }
+        }
+
+        /// <summary>
+        /// Generate variants for a word and return as a list.
+        /// Used for frequency inheritance where we need to iterate over variants.
+        /// </summary>
+        private static List<string> GenerateVariantsList(string word)
+        {
+            var variants = new List<string>();
+
             const string COENG_TA = "\u17D2\u178F";
             const string COENG_DA = "\u17D2\u178D";
-            const string COENG_RO = "\u17D2\u179A";
             const char COENG = '\u17D2';
             const char RO = '\u179A';
 
             // 1. Ta/Da swap
             if (word.Contains(COENG_TA))
             {
-                var v = word.Replace(COENG_TA, COENG_DA);
-                allWords.Add(v);
+                variants.Add(word.Replace(COENG_TA, COENG_DA));
             }
             if (word.Contains(COENG_DA))
             {
-                var v = word.Replace(COENG_DA, COENG_TA);
-                allWords.Add(v);
+                variants.Add(word.Replace(COENG_DA, COENG_TA));
             }
 
             // 2. Coeng Ro ordering swap
-            // Pattern 1: Coeng Ro + Other Coeng -> Other Coeng + Coeng Ro
-            // Pattern 2: Other Coeng + Coeng Ro -> Coeng Ro + Other Coeng
-            // Using simple string scanning instead of regex for performance
-
             for (int i = 0; i < word.Length - 3; i++)
             {
                 if (word[i] == COENG)
                 {
-                    // Check for pattern: Coeng X Coeng Y where one of X/Y is Ro
                     if (i + 3 < word.Length && word[i + 2] == COENG)
                     {
                         char first = word[i + 1];
                         char second = word[i + 3];
 
-                        // Pattern 1: Coeng Ro + Coeng Other -> Coeng Other + Coeng Ro
                         if (first == RO && second != RO)
                         {
-                            // Swap: \u17D2\u179A\u17D2X -> \u17D2X\u17D2\u179A
                             var chars = word.ToCharArray();
                             chars[i + 1] = second;
                             chars[i + 3] = RO;
-                            allWords.Add(new string(chars));
+                            variants.Add(new string(chars));
                         }
-                        // Pattern 2: Coeng Other + Coeng Ro -> Coeng Ro + Coeng Other
                         else if (first != RO && second == RO)
                         {
-                            // Swap: \u17D2X\u17D2\u179A -> \u17D2\u179A\u17D2X
                             var chars = word.ToCharArray();
                             chars[i + 1] = RO;
                             chars[i + 3] = first;
-                            allWords.Add(new string(chars));
+                            variants.Add(new string(chars));
                         }
                     }
                 }
             }
+
+            return variants;
         }
     }
 }
