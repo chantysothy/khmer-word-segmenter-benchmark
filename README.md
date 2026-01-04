@@ -17,31 +17,31 @@ Tested on the same hardware with 60,771 lines of Khmer Wikipedia corpus:
 
 | Language | Speed (lines/sec) | Speedup vs Python | Output Match | Key Optimizations |
 |----------|-------------------|-------------------|--------------|-------------------|
-| **Go** | **168,983** | **221x** | 99.96% | Trie + 32 goroutines + sync.Pool |
-| **C# (.NET)** | 111,269 | 146x | ✅ 100% | Trie + lookup tables + fast JSON |
-| **Rust** | 92,974 | 122x | ✅ 100% | Trie + FxHashMap + Rayon parallelism |
-| **Java** | 39,928 | 52x | 99.96% | Trie + parallel streams + flat arrays |
-| **C++** | 22,043 | 29x | ✅ 100% | Trie + 1BRC optimizations + single-threaded |
-| **Node.js** | 21,615 | 28x | 99.99% | Trie + worker threads + charCode optimization |
-| **WASM** | 16,398 | 21x | 99.58% | AssemblyScript + worker threads + bit flag tables |
-| **Bun** | 16,186 | 21x | 99.97% | Trie + Web Workers + TypedArray buffers |
-| **Python** | 764 | 1x | Baseline | Reference implementation |
+| **Go** | **179,188** | **236x** | ✅ 100% | Trie + 32 goroutines + sync.Pool |
+| **C# (.NET)** | 87,330 | 139x | ✅ 100% | Trie + lookup tables + fast JSON |
+| **Rust** | 79,688 | 126x | ✅ 100% | Trie + FxHashMap + Rayon parallelism |
+| **Java** | 46,284 | 73x | ✅ 100% | Trie + parallel streams + flat arrays |
+| **C++** | 25,447 | 40x | ✅ 100% | Trie + 1BRC optimizations + single-threaded |
+| **Node.js** | 9,781 | 16x | ✅ 100% | Trie + worker threads + charCode optimization |
+| **Bun** | 9,558 | 15x | ✅ 100% | Trie + Web Workers + TypedArray buffers |
+| **WASM** | 8,651 | 14x | ✅ 100% | AssemblyScript + worker threads + bit flag tables |
+| **Python** | 630 | 1x | Baseline | Reference implementation |
 
 > **Note**: "Output Match" indicates segmentation accuracy compared to Python baseline on 60,771 test lines.
-> C#, Rust, and C++ achieve **100% identical output** to the Python reference implementation.
+> All optimized implementations achieve **100% identical output** to the Python reference implementation.
 
 ### Performance Visualization
 
 ```
-Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 168,983
-C#       ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 111,269
-Rust     ████████████████████████████████████████████████████████████████████████████████████████████████ 92,974
-Java     ████████████████████████████████████████ 39,928
-C++      ██████████████████████ 22,043
-Node.js  █████████████████████ 21,615
-WASM     ████████████████ 16,398
-Bun      ████████████████ 16,186
-Python   █ 764
+Go       ████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 179,188
+C#       ████████████████████████████████████████████████████████████████████████████████████████████ 87,330
+Rust     ████████████████████████████████████████████████████████████████████████████████ 79,688
+Java     ████████████████████████████████████████████████ 46,284
+C++      ██████████████████████████ 25,447
+Node.js  ██████████ 9,781
+Bun      ██████████ 9,558
+WASM     █████████ 8,651
+Python   █ 630
          └────────────────────────────────────────────────────────────────────────────────────────────────── lines/sec
 ```
 

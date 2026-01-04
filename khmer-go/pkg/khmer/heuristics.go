@@ -87,7 +87,10 @@ func PostProcessUnknowns(segments []string, dictionary *Dictionary) []string {
 				isKnown = true
 			} else if len(runes) == 1 && IsValidSingleWord(firstChar) {
 				isKnown = true
-			} else if IsSeparator(firstChar) {
+			} else if len(runes) == 1 && IsSeparator(firstChar) {
+				// Only single-char separators break the merge chain
+				// Multi-char segments starting with space (e.g., " ប់") should merge with unknowns
+				// This matches Python's _is_separator behavior which fails on multi-char strings
 				isKnown = true
 			} else if strings.Contains(seg, ".") && len(runes) >= 2 {
 				// Acronym pattern

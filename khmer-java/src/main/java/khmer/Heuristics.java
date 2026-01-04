@@ -102,7 +102,10 @@ public final class Heuristics {
                     isKnown = true;
                 } else if (seg.length() == 1 && Constants.isValidSingleWord(firstChar)) {
                     isKnown = true;
-                } else if (Constants.isSeparator(firstChar)) {
+                } else if (seg.length() == 1 && Constants.isSeparator(firstChar)) {
+                    // Only single-char separators break the merge chain
+                    // Multi-char segments starting with space (e.g., " ប់") should merge with unknowns
+                    // This matches Python's _is_separator behavior which fails on multi-char strings
                     isKnown = true;
                 } else if (seg.contains(".") && seg.length() >= 2) {
                     // Acronym pattern
