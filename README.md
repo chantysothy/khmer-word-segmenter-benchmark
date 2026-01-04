@@ -2,6 +2,8 @@
 
 A comprehensive benchmark project comparing optimized implementations of a Khmer word segmentation algorithm across **9 programming languages**. This project demonstrates how the same Viterbi-based algorithm can be optimized and ported to achieve dramatic performance improvements.
 
+> **Built with AI**: All code implementations across 9 languages were written by [Claude Code CLI](https://claude.ai/code) using **Claude Opus 4** (claude-opus-4-5-20250514). The AI translated the original Python algorithm to Go, C++, Rust, C#, Java, Node.js, Bun, and WebAssembly, applying language-specific optimizations including 1BRC (One Billion Row Challenge) techniques.
+
 ## Project Goal
 
 This project takes the original Python implementation of a probabilistic Khmer word segmenter and ports it to multiple programming languages, applying language-specific optimizations to maximize performance. The goal is to:
