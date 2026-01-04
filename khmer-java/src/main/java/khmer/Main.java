@@ -161,21 +161,33 @@ public class Main {
         System.out.printf("Speed: %.2f lines/sec%n", numLines / duration);
     }
 
+    // ============================================================================
+    // High-performance JSON building inspired by 1BRC optimizations
+    // ============================================================================
+
+    // ThreadLocal StringBuilder to avoid allocation overhead in hot path
+    private static final ThreadLocal<StringBuilder> JSON_BUFFER = ThreadLocal.withInitial(() -> new StringBuilder(512));
+
     private static String toJson(int id, String input, List<String> segments) {
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = JSON_BUFFER.get();
+        sb.setLength(0); // Clear without reallocating
+
         sb.append("{\"id\":").append(id);
-        sb.append(",\"input\":\"").append(escapeJson(input)).append("\"");
-        sb.append(",\"segments\":[");
+        sb.append(",\"input\":\"");
+        escapeJsonTo(sb, input);
+        sb.append("\",\"segments\":[");
         for (int j = 0; j < segments.size(); j++) {
-            if (j > 0) sb.append(",");
-            sb.append("\"").append(escapeJson(segments.get(j))).append("\"");
+            if (j > 0) sb.append(',');
+            sb.append('"');
+            escapeJsonTo(sb, segments.get(j));
+            sb.append('"');
         }
         sb.append("]}");
         return sb.toString();
     }
 
-    private static String escapeJson(String s) {
-        StringBuilder sb = new StringBuilder();
+    // Escape JSON directly into StringBuilder - no intermediate String allocation
+    private static void escapeJsonTo(StringBuilder sb, String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
             switch (c) {
@@ -186,12 +198,18 @@ public class Main {
                 case '\t': sb.append("\\t"); break;
                 default:
                     if (c < 32) {
-                        sb.append(String.format("\\u%04x", (int) c));
+                        sb.append("\\u");
+                        sb.append(HEX_DIGITS[(c >> 12) & 0xF]);
+                        sb.append(HEX_DIGITS[(c >> 8) & 0xF]);
+                        sb.append(HEX_DIGITS[(c >> 4) & 0xF]);
+                        sb.append(HEX_DIGITS[c & 0xF]);
                     } else {
                         sb.append(c);
                     }
             }
         }
-        return sb.toString();
     }
+
+    // Pre-computed hex digits for fast formatting (avoids String.format overhead)
+    private static final char[] HEX_DIGITS = "0123456789abcdef".toCharArray();
 }
