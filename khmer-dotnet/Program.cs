@@ -21,6 +21,13 @@ namespace KhmerSegmenter
 
         static void Main(string[] args)
         {
+            // Quick test mode for dictionary check
+            if (args.Length > 0 && args[0] == "--test-dict")
+            {
+                TestDictionaryWords(args.Skip(1).ToArray());
+                return;
+            }
+
             var parsedArgs = ParseArgs(args);
 
             Console.WriteLine("Initializing .NET Segmenter...");
@@ -154,6 +161,148 @@ namespace KhmerSegmenter
             }
 
             return parsed;
+        }
+
+        static void TestDictionaryWords(string[] testWords)
+        {
+            var baseDir = AppContext.BaseDirectory;
+            var dictionary = new Dictionary();
+            dictionary.Load(
+                Path.Combine(baseDir, "../../../../data/khmer_dictionary_words.txt"),
+                Path.Combine(baseDir, "../../../../data/khmer_word_frequencies.json")
+            );
+
+            // Test specific words that showed mismatches
+            string[] wordsToCheck = { "សន្មត់", "អារម្មណ៏", "បុរេប្រវត្តិ", "បុរេប្រវត្តិសាស្រ្ត", "ឦឝានវម៌្ម" };
+
+            Console.WriteLine("=== Dictionary Check ===");
+            foreach (var word in wordsToCheck)
+            {
+                bool inDict = dictionary.Contains(word);
+                float cost = dictionary.GetWordCost(word);
+                Console.WriteLine($"'{word}': in_dict={inDict}, cost={cost}");
+            }
+
+            // Test segmentation
+            Console.WriteLine("\n=== Segmentation Test ===");
+            var segmenter = new KhmerSegmenter(dictionary);
+            foreach (var word in wordsToCheck)
+            {
+                var segments = segmenter.Segment(word);
+                Console.WriteLine($"'{word}': [{string.Join(", ", segments.ConvertAll(s => $"'{s}'"))}]");
+            }
+
+            // Debug cluster lengths
+            Console.WriteLine("\n=== Cluster Length Debug ===");
+            string testWord = "សន្មត់";
+            Console.WriteLine($"Text: {testWord}");
+            Console.Write("Chars: [");
+            for (int i = 0; i < testWord.Length; i++)
+            {
+                if (i > 0) Console.Write(", ");
+                Console.Write($"0x{(int)testWord[i]:x4}");
+            }
+            Console.WriteLine("]");
+
+            // Check dictionary substrings
+            Console.WriteLine("\n=== Dictionary Substring Check ===");
+            for (int start = 0; start < testWord.Length; start++)
+            {
+                for (int end = start + 1; end <= testWord.Length; end++)
+                {
+                    string substr = testWord.Substring(start, end - start);
+                    if (dictionary.Contains(substr))
+                    {
+                        float cost = dictionary.GetWordCost(substr);
+                        Console.WriteLine($"Dict match: \"{substr}\" [{start}:{end}] cost={cost:F2}");
+                    }
+                }
+            }
+
+            // Check valid single words
+            Console.WriteLine("\n=== Valid Single Words Check ===");
+            char testChar = '\u179F'; // ស
+            Console.WriteLine($"'ស' (0x179f) IsValidSingleWord: {Constants.IsValidSingleWord(testChar)}");
+            Console.WriteLine($"'ស' in dictionary: {dictionary.Contains("ស")}");
+            if (dictionary.Contains("ស"))
+            {
+                Console.WriteLine($"'ស' cost: {dictionary.GetWordCost("ស")}");
+            }
+            Console.WriteLine($"\nC# Unknown cost: {dictionary.UnknownCost}");
+
+            // Check specific words for the mismatched case
+            Console.WriteLine("\n=== Specific Word Check for បុរេប្រវត្តិសាស្រ្ត ===");
+            string[] checkWords = { "បុរេ", "បុរេប្រវត្តិ", "ប្រវត្តិសាស្រ្ត", "សាស្រ្ត", "ប្រវត្តិសាស្ត្រ" };
+            foreach (var w in checkWords)
+            {
+                bool inDict = dictionary.Contains(w);
+                float cost = dictionary.GetWordCost(w);
+                Console.WriteLine($"\"{w}\": in_dict={inDict}, cost={cost:F2}");
+            }
+
+            // Check mismatch words
+            Console.WriteLine("\n=== Mismatch Word Check ===");
+            string[] mismatchWords = { "រុក", "រានទន្រ្ទាន", "រុករាន", "ទន្រ្ទាន" };
+            foreach (var w in mismatchWords)
+            {
+                bool inDict = dictionary.Contains(w);
+                float cost = dictionary.GetWordCost(w);
+                Console.WriteLine($"\"{w}\": in_dict={inDict}, cost={cost:F4}");
+            }
+
+            // Test segmentation
+            Console.WriteLine("\n=== Mismatch Segmentation ===");
+            string mismatchTest = "រុករានទន្រ្ទាន";
+            var mismatchSegments = segmenter.Segment(mismatchTest);
+            Console.WriteLine($"'{mismatchTest}': [{string.Join(", ", mismatchSegments.ConvertAll(s => $"'{s}'"))}]");
+        }
+
+        static int TestGetKhmerClusterLength(char[] chars, int startIndex, int n)
+        {
+            if (startIndex >= n) return 0;
+
+            int i = startIndex;
+            char c = chars[i];
+
+            // Check for Base Consonant or Independent Vowel (0x1780-0x17B3)
+            if (!((c >= 0x1780 && c <= 0x17B3)))
+            {
+                return 1;
+            }
+            i++;
+
+            while (i < n)
+            {
+                char current = chars[i];
+
+                // Check for Coeng (0x17D2)
+                if (current == '\u17D2')
+                {
+                    if (i + 1 < n)
+                    {
+                        char nextC = chars[i + 1];
+                        // IsConsonant: 0x1780-0x17A2
+                        if (nextC >= 0x1780 && nextC <= 0x17A2)
+                        {
+                            i += 2;
+                            continue;
+                        }
+                    }
+                    break;
+                }
+
+                // IsDependentVowel: 0x17B6-0x17C5
+                // IsSign: 0x17C6-0x17D1, 0x17D3, 0x17DD
+                if ((current >= 0x17B6 && current <= 0x17D1) || current == 0x17D3 || current == 0x17DD)
+                {
+                    i++;
+                    continue;
+                }
+
+                break;
+            }
+
+            return i - startIndex;
         }
     }
 
