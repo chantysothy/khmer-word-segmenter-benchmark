@@ -1,0 +1,206 @@
+[
+  {
+    "id": 0,
+    "input": "សួស្តី",
+    "description": "Single known word (hello)",
+    "expected": [
+      "សួស្តី"
+    ]
+  },
+  {
+    "id": 1,
+    "input": "កម្ពុជា",
+    "description": "Single known word (Cambodia)",
+    "expected": [
+      "កម្ពុជា"
+    ]
+  },
+  {
+    "id": 2,
+    "input": "ក្រុមហ៊ុន",
+    "description": "Company",
+    "expected": [
+      "ក្រុមហ៊ុន"
+    ]
+  },
+  {
+    "id": 3,
+    "input": "សាកលវិទ្យាល័យ",
+    "description": "University",
+    "expected": [
+      "សាកលវិទ្យាល័យ"
+    ]
+  },
+  {
+    "id": 4,
+    "input": "ខ្ញុំស្រលាញ់កម្ពុជា",
+    "description": "I love Cambodia",
+    "expected": [
+      "ខ្ញុំ",
+      "ស្រលាញ់",
+      "កម្ពុជា"
+    ]
+  },
+  {
+    "id": 5,
+    "input": "សួស្តីបងប្អូន",
+    "description": "Hello brothers and sisters",
+    "expected": [
+      "សួស្តី",
+      "បងប្អូន"
+    ]
+  },
+  {
+    "id": 6,
+    "input": "សួស្តី បង",
+    "description": "Hello brother (with space)",
+    "expected": [
+      "សួស្តី",
+      " ",
+      "បង"
+    ]
+  },
+  {
+    "id": 7,
+    "input": "ខ្ញុំ ស្រលាញ់ អ្នក",
+    "description": "I love you (with spaces)",
+    "expected": [
+      "ខ្ញុំ",
+      " ",
+      "ស្រលាញ់",
+      " ",
+      "អ្នក"
+    ]
+  },
+  {
+    "id": 8,
+    "input": "១២៣៤៥",
+    "description": "Khmer numbers",
+    "expected": [
+      "១២៣៤៥"
+    ]
+  },
+  {
+    "id": 9,
+    "input": "តម្លៃ១០០០រៀល",
+    "description": "Price 1000 riel",
+    "expected": [
+      "តម្លៃ",
+      "១០០០",
+      "រៀល"
+    ]
+  },
+  {
+    "id": 10,
+    "input": "ឆ្នាំ២០២៥",
+    "description": "Year 2025",
+    "expected": [
+      "ឆ្នាំ",
+      "២០២៥"
+    ]
+  },
+  {
+    "id": 11,
+    "input": "ទូរស័ព្ទ០១២៣៤៥៦៧៨",
+    "description": "Phone number",
+    "expected": [
+      "ទូរស័ព្ទ",
+      "០១២៣៤៥៦៧៨"
+    ]
+  },
+  {
+    "id": 12,
+    "input": "សួស្តី។",
+    "description": "Hello with period",
+    "expected": [
+      "សួស្តី",
+      "។"
+    ]
+  },
+  {
+    "id": 13,
+    "input": "តើអ្នកសុខសប្បាយទេ?",
+    "description": "Are you well?",
+    "expected": [
+      "តើ",
+      "អ្នក",
+      "សុខសប្បាយ",
+      "ទេ",
+      "?"
+    ]
+  },
+  {
+    "id": 14,
+    "input": "សម្រា ប់ការ",
+    "description": "Space before sign pattern",
+    "expected": [
+      "ស",
+      "ម្រា ប់",
+      "ការ"
+    ]
+  },
+  {
+    "id": 15,
+    "input": "ជា រៀង រាល់",
+    "description": "Multiple space patterns",
+    "expected": [
+      "ជា",
+      " ",
+      "រៀង",
+      " ",
+      "រាល់"
+    ]
+  },
+  {
+    "id": 16,
+    "input": "ឡូរ៉េម",
+    "description": "Unknown/foreign word",
+    "expected": [
+      "ឡូ",
+      "រ៉េម"
+    ]
+  },
+  {
+    "id": 17,
+    "input": "",
+    "description": "Empty string",
+    "expected": []
+  },
+  {
+    "id": 18,
+    "input": " ",
+    "description": "Single space",
+    "expected": [
+      " "
+    ]
+  },
+  {
+    "id": 19,
+    "input": "ប្រទេសកម្ពុជាមានទីតាំងស្ថិតនៅអាស៊ីអាគ្នេយ៍។",
+    "description": "Cambodia is in Southeast Asia",
+    "expected": [
+      "ប្រទេស",
+      "កម្ពុជា",
+      "មាន",
+      "ទីតាំង",
+      "ស្ថិតនៅ",
+      "អាស៊ី",
+      "អាគ្នេយ៍",
+      "។"
+    ]
+  },
+  {
+    "id": 20,
+    "input": "រាជធានីភ្នំពេញជាទីក្រុងធំជាងគេ។",
+    "description": "Phnom Penh is the largest city",
+    "expected": [
+      "រាជធានី",
+      "ភ្នំពេញ",
+      "ជា",
+      "ទីក្រុង",
+      "ធំជាង",
+      "គេ",
+      "។"
+    ]
+  }
+]

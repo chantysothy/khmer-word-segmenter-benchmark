@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NUnit" Version="4.2.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Dictionary.cs" Link="Dictionary.cs" />
+    <Compile Include="..\Constants.cs" Link="Constants.cs" />
+    <Compile Include="..\Heuristics.cs" Link="Heuristics.cs" />
+    <Compile Include="..\KhmerSegmenter.cs" Link="KhmerSegmenter.cs" />
+    <Compile Include="..\Trie.cs" Link="Trie.cs" />
+  </ItemGroup>
+
+</Project>
