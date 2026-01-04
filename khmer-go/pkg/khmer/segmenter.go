@@ -3,7 +3,16 @@ package khmer
 import (
 	"math"
 	"strings"
+	"sync"
 )
+
+// 1BRC optimization: Pool for segment slice reuse
+var segmentPool = sync.Pool{
+	New: func() interface{} {
+		s := make([]string, 0, 64)
+		return &s
+	},
+}
 
 // KhmerSegmenter segments Khmer text using the Viterbi algorithm
 type KhmerSegmenter struct {
@@ -11,6 +20,8 @@ type KhmerSegmenter struct {
 	// Pre-allocated buffers for reuse (not thread-safe, but faster)
 	dpCost   []float32
 	dpParent []int
+	// 1BRC optimization: Pre-allocated rune buffer
+	runeBuffer []rune
 }
 
 // NewKhmerSegmenter creates a new segmenter with the given dictionary
@@ -21,6 +32,7 @@ func NewKhmerSegmenter(dictionary *Dictionary) *KhmerSegmenter {
 		Dictionary: dictionary,
 		dpCost:     make([]float32, initialSize),
 		dpParent:   make([]int, initialSize),
+		runeBuffer: make([]rune, initialSize),
 	}
 }
 
@@ -32,8 +44,25 @@ func (s *KhmerSegmenter) Segment(text string) []string {
 		return []string{}
 	}
 
-	runes := []rune(textRaw)
-	n := len(runes)
+	// 1BRC optimization: Reuse rune buffer to avoid allocation
+	runeCount := 0
+	for range textRaw {
+		runeCount++
+	}
+
+	// Ensure rune buffer is large enough
+	if len(s.runeBuffer) < runeCount {
+		s.runeBuffer = make([]rune, runeCount*2)
+	}
+
+	// Fill rune buffer (reuse existing memory)
+	runes := s.runeBuffer[:runeCount]
+	idx := 0
+	for _, r := range textRaw {
+		runes[idx] = r
+		idx++
+	}
+	n := runeCount
 
 	// Ensure buffers are large enough
 	if len(s.dpCost) < n+1 {

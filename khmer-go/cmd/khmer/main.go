@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -14,11 +13,86 @@ import (
 	"github.com/khmer-segmenter/pkg/khmer"
 )
 
-// OutputRecord represents a single segmentation result
-type OutputRecord struct {
-	ID       int      `json:"id"`
-	Input    string   `json:"input"`
-	Segments []string `json:"segments"`
+// 1BRC optimization: Pre-allocated string builder pool for JSON output
+var builderPool = sync.Pool{
+	New: func() interface{} {
+		return &strings.Builder{}
+	},
+}
+
+// 1BRC optimization: Custom JSON builder - avoids reflection and allocation overhead of json.Marshal
+// Format: {"id":N,"input":"...","segments":["...","..."]}
+func buildJSON(sb *strings.Builder, id int, input string, segments []string) {
+	sb.Reset()
+	sb.Grow(len(input)*2 + len(segments)*10 + 50) // Pre-allocate estimated size
+
+	sb.WriteString(`{"id":`)
+	writeInt(sb, id)
+	sb.WriteString(`,"input":"`)
+	writeEscapedJSON(sb, input)
+	sb.WriteString(`","segments":[`)
+
+	for i, seg := range segments {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteByte('"')
+		writeEscapedJSON(sb, seg)
+		sb.WriteByte('"')
+	}
+	sb.WriteString(`]}`)
+}
+
+// 1BRC optimization: Fast integer to string (avoids strconv allocation)
+func writeInt(sb *strings.Builder, n int) {
+	if n == 0 {
+		sb.WriteByte('0')
+		return
+	}
+
+	// Handle negative numbers
+	if n < 0 {
+		sb.WriteByte('-')
+		n = -n
+	}
+
+	// Build digits in reverse
+	var buf [20]byte
+	pos := len(buf)
+	for n > 0 {
+		pos--
+		buf[pos] = byte('0' + n%10)
+		n /= 10
+	}
+	sb.Write(buf[pos:])
+}
+
+// 1BRC optimization: Write JSON-escaped string (handles control chars and quotes)
+func writeEscapedJSON(sb *strings.Builder, s string) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '"':
+			sb.WriteString(`\"`)
+		case '\\':
+			sb.WriteString(`\\`)
+		case '\n':
+			sb.WriteString(`\n`)
+		case '\r':
+			sb.WriteString(`\r`)
+		case '\t':
+			sb.WriteString(`\t`)
+		default:
+			if c < 0x20 {
+				// Other control characters - use unicode escape
+				sb.WriteString(`\u00`)
+				sb.WriteByte("0123456789abcdef"[c>>4])
+				sb.WriteByte("0123456789abcdef"[c&0xf])
+			} else {
+				sb.WriteByte(c)
+			}
+		}
+	}
 }
 
 func main() {
@@ -126,19 +200,17 @@ func run(dictPath, freqPath, inputPath, outputPath string, limit, threads int) e
 			defer wg.Done()
 			// Each goroutine has its own segmenter instance (thread-local buffers)
 			segmenter := khmer.NewKhmerSegmenter(dictionary)
+			// 1BRC optimization: Reuse string builder from pool
+			sb := builderPool.Get().(*strings.Builder)
+			defer builderPool.Put(sb)
 
 			for i := range jobs {
 				line := lines[i]
 				segments := segmenter.Segment(line)
 
-				record := OutputRecord{
-					ID:       i,
-					Input:    line,
-					Segments: segments,
-				}
-
-				jsonBytes, _ := json.Marshal(record)
-				results[i] = string(jsonBytes)
+				// 1BRC optimization: Custom JSON builder (no reflection, minimal allocation)
+				buildJSON(sb, i, line, segments)
+				results[i] = sb.String()
 			}
 		}()
 	}
@@ -160,7 +232,8 @@ func run(dictPath, freqPath, inputPath, outputPath string, limit, threads int) e
 		}
 		defer outputFile.Close()
 
-		writer := bufio.NewWriter(outputFile)
+		// 1BRC optimization: Use larger buffer for output (256KB vs default 4KB)
+		writer := bufio.NewWriterSize(outputFile, 256*1024)
 		for _, jsonStr := range results {
 			writer.WriteString(jsonStr)
 			writer.WriteByte('\n')
